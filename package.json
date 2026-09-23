@@ -1,0 +1,55 @@
+{
+  "name": "nava-form-filling-assistant-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Durable, multi-tenant server side of the Nava Form-Filling Assistant contracts: connector reads, benefits case graph, served playbooks, work queue, and review-ready packets with per-field provenance.",
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@10.12.1",
+  "pnpm": {
+    "onlyBuiltDependencies": ["@biomejs/biome", "esbuild"]
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "eve:dev": "dotenv -e .env.local -- eve dev",
+    "eve:info": "dotenv -e .env.local -- eve info",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx lib/db/migrate.ts",
+    "db:seed": "tsx lib/db/seed.ts",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "fixture": "tsx tests/fixtures/serve.ts",
+    "prove": "tsx --env-file-if-exists=.env.local scripts/prove.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "3.0.118",
+    "@ai-sdk/google-vertex": "^4.0.80",
+    "agent-browser": "^0.33.2",
+    "ai": "6.0.116",
+    "drizzle-orm": "^0.34.0",
+    "eve": "^0.27.0",
+    "next": "16.0.7",
+    "postgres": "^3.4.4",
+    "react": "19.0.1",
+    "react-dom": "19.0.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19",
+    "dotenv": "^16.4.5",
+    "dotenv-cli": "^7.4.2",
+    "drizzle-kit": "^0.25.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3",
+    "vitest": "^3.2.4",
+    "yaml": "^2.9.1"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1789666584287,
+      "tag": "0000_dashing_living_tribunal",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1789666600000,
+      "tag": "0001_tenant_isolation_and_safety",
+      "breakpoints": false
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790190000000,
+      "tag": "0002_submit_gate_parity",
+      "breakpoints": false
+    }
+  ]
+}

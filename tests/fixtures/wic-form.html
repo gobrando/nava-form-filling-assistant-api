@@ -1,0 +1,64 @@
+<!doctype html>
+<!--
+  A stand-in for the Riverside WIC application at ruhealth.org.
+
+  Selector ids match the seeded `www.ruhealth.org` playbook, so the e2e exercises
+  real probe evaluation and a real field map rather than a synthetic one. A live
+  county site is deliberately not used in a test: it is someone's production
+  intake form, and a test suite has no business submitting to it or depending on
+  its uptime.
+
+  `#edit-zip-code` carries a maxlength that truncates, which is how the e2e
+  reproduces a silent write failure — the field accepts the write and holds
+  something different.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Apply for WIC — fixture</title>
+  </head>
+  <body>
+    <h1>Apply for WIC</h1>
+
+    <form id="wic-application">
+      <label for="edit-name">Name</label>
+      <input id="edit-name" name="name" type="text" required />
+
+      <label for="edit-phone">Phone</label>
+      <input id="edit-phone" name="phone" type="tel" />
+
+      <label for="edit-email">Email</label>
+      <input id="edit-email" name="email" type="email" />
+
+      <label for="edit-zip-code">Zip code</label>
+      <input id="edit-zip-code" name="zip_code" type="text" maxlength="4" />
+
+      <label for="edit-preferred-language">Preferred language</label>
+      <select id="edit-preferred-language" name="preferred_language">
+        <option value="">- Select -</option>
+        <option>English</option>
+        <option>Spanish</option>
+        <option>Vietnamese</option>
+      </select>
+
+      <label for="edit-please-choose-the-wic-clinic-closest-to-you">
+        Please choose the WIC clinic closest to you
+      </label>
+      <select
+        id="edit-please-choose-the-wic-clinic-closest-to-you"
+        name="clinic"
+        required
+      >
+        <option value="">- Select -</option>
+        <option>Lake Elsinore WIC</option>
+        <option>Perris WIC</option>
+        <option>Riverside WIC</option>
+      </select>
+
+      <!-- The run stops here. A CAPTCHA is a site asking for a person. -->
+      <div id="captcha-gate" data-captcha="true">Verify you are human</div>
+
+      <button id="edit-submit" type="submit">Submit</button>
+    </form>
+  </body>
+</html>

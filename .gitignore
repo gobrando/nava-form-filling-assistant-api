@@ -1,0 +1,29 @@
+node_modules
+.pnpm-store
+.next
+.eve
+out
+build
+dist
+
+.env
+.env.local
+.env*.local
+
+*.tsbuildinfo
+next-env.d.ts
+
+.DS_Store
+npm-debug.log*
+pnpm-debug.log*
+
+coverage
+.vitest
+
+# Service-account JSON must never be committed. Vertex auth is documented in
+# README "Environment".
+gcp-service-account*.json
+
+# Local editor plugin config, not project configuration.
+.cursor/
+.output

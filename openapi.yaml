@@ -1,0 +1,1253 @@
+openapi: 3.0.3
+
+# Hand-authored, and the contract rather than a description of one.
+#
+# Two reasons it is written by hand and not generated. First, the GCP path
+# needs it as an input: API Gateway takes an OpenAPI spec and handles auth,
+# rate limiting, and routing from it. A generated
+# spec follows the code; this one leads it. Second, the connector section is not
+# ours to change — it describes a contract the Chrome extension already speaks,
+# and writing it out by hand is how a breaking change becomes visible in review.
+#
+# OpenAPI 3.0.3, not 3.1, because GCP API Gateway does not accept 3.1.
+
+info:
+  title: Nava Form-Filling Assistant API
+  version: 0.1.0
+  description: |
+    Post a household and a target benefits application; get back a review-ready
+    packet with per-field provenance.
+
+    ## What this service will not do
+
+    It never submits, certifies, or signs an application. A benefits application
+    is a legal attestation by the participant about their own household, and
+    nobody has delegated that. `POST /applications/{id}/submit` *records* that a
+    human submitted; it does not submit.
+
+    These fields are never inferred, and the database rejects an attempt:
+    `ssn`, `housingStatus`, `preferredContact`, `householdSize`,
+    `immigrationStatus`, `income`, `childcare`, `unemployment`, `ein`.
+
+    ## Execution modes
+
+    A run with a fresh playbook is `script`: one deterministic pass over a field
+    map, no model. A novel or drifted site is `model`: an agent drives it, and a
+    scribe repairs the playbook so the next run is `script`. The mode is
+    recorded per application, which is what makes cost attributable to a program
+    and a playbook version.
+
+    ## Provenance
+
+    Every value traces to a `Fact` row or declares it was already on the page.
+    There is no third option — a database CHECK constraint enforces it — so
+    "share of values with inspectable provenance" is a query, not a claim.
+
+servers:
+  - url: https://api.example.invalid
+    description: Replace with the deployed origin.
+  - url: http://127.0.0.1:3000
+    description: Local development.
+
+tags:
+  - name: Connectors
+    description: |
+      Read-only access to an organization's system of record. **This contract is
+      fixed** — it is defined by `connector-service/README.md` in the Chrome
+      extension, and an existing install points at this service by changing only
+      its Service URL. Do not alter these paths, query parameters, or response
+      shapes without shipping a matching extension release.
+  - name: Case graph
+    description: Households and the append-only facts ledger.
+  - name: Completion
+    description: Running an application, answering gaps, and the review packet.
+  - name: Review
+    description: Human review and the submit gate.
+  - name: Work queue
+    description: Leases, handoff, and the resume decision.
+  - name: Catalog
+    description: Programs and playbooks.
+  - name: Audit
+    description: The durable audit trail.
+
+security:
+  - bearerKey: []
+
+paths:
+  # ---------------------------------------------------------------------------
+  # Connectors — contract fixed by the extension
+  # ---------------------------------------------------------------------------
+  /v1/connectors/{connectionId}/health:
+    get:
+      tags: [Connectors]
+      summary: Check a connection
+      description: |
+        Called when an administrator saves a connection and again before a
+        lookup. Must not touch the provider.
+      parameters:
+        - $ref: '#/components/parameters/connectionId'
+      responses:
+        '200':
+          description: The connection is usable.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, provider, organizationName, mode]
+                properties:
+                  ok: { type: boolean, enum: [true] }
+                  provider: { type: string, example: apricot360 }
+                  organizationName: { type: string }
+                  mode:
+                    type: string
+                    enum: [local-demo, live]
+                    description: |
+                      `live` calls the provider. `local-demo` serves the seeded
+                      case graph in the provider's wire shape, so the contract
+                      can be exercised without holding anyone's credentials.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/connectors/{connectionId}/schema:
+    get:
+      tags: [Connectors]
+      summary: Labeled fields, for mapping review
+      description: |
+        Returned before any record is read. The extension will not fetch a
+        record until an administrator has reviewed the field mapping, which is
+        what keeps a provider-side rename from silently writing a wrong value
+        into a benefits application.
+      parameters:
+        - $ref: '#/components/parameters/connectionId'
+        - name: sourceId
+          in: query
+          schema: { type: string }
+          description: Provider form or dataset id. `formId` is accepted as a legacy alias.
+      responses:
+        '200':
+          description: The field list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, fields]
+                properties:
+                  ok: { type: boolean, enum: [true] }
+                  fields:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, label, type, reference_tag]
+                      properties:
+                        id: { type: integer }
+                        label: { type: string }
+                        type: { type: string }
+                        reference_tag:
+                          type: string
+                          description: |
+                            The canonical fact key. Aligned with the extension's
+                            field purposes, which is why no translation layer is
+                            needed between the two.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '501': { $ref: '#/components/responses/AdapterUnavailable' }
+
+  /v1/connectors/{connectionId}/records/{recordId}:
+    get:
+      tags: [Connectors]
+      summary: Read one record
+      description: |
+        The only endpoint that returns participant data. Rate-limited, and it
+        writes an audit event carrying organization, user, connection, record id,
+        outcome, and timestamp — and no values.
+
+        The body is the provider's own record shape, **unwrapped**, with no `ok`
+        field. That is what the extension's mapping code already parses.
+      parameters:
+        - $ref: '#/components/parameters/connectionId'
+        - name: recordId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sourceId
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: The provider record, unwrapped.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        type: { type: string }
+                        attributes:
+                          type: object
+                          additionalProperties: true
+                          description: Provider-native keys, e.g. `field_101`, plus `form_id` and `mod_time`.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '501': { $ref: '#/components/responses/AdapterUnavailable' }
+        '502': { $ref: '#/components/responses/UpstreamFailure' }
+
+  # ---------------------------------------------------------------------------
+  # Case graph
+  # ---------------------------------------------------------------------------
+  /v1/households:
+    get:
+      tags: [Case graph]
+      summary: List households
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      responses:
+        '200':
+          description: Most recently updated first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  households:
+                    type: array
+                    items: { $ref: '#/components/schemas/HouseholdRef' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Case graph]
+      summary: Upsert a household by your own identifier
+      description: |
+        `externalRef` is deliberately **your** identifier, not a record id in any
+        one system. Gating a session on one system's id stops caseworkers whose
+        client is identified in a different system from starting at all. `recordId` and
+        `connectionId` are optional annotations.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [externalRef]
+              additionalProperties: false
+              properties:
+                externalRef: { type: string, maxLength: 200 }
+                connectionId: { type: string, maxLength: 200 }
+                recordId: { type: string, maxLength: 200 }
+                facts:
+                  type: array
+                  maxItems: 500
+                  items: { $ref: '#/components/schemas/FactInput' }
+      responses:
+        '201':
+          description: Created or updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  household: { $ref: '#/components/schemas/HouseholdRef' }
+                  factsWritten: { type: integer }
+                  rejected:
+                    type: array
+                    description: Facts refused because the key may not be inferred.
+                    items:
+                      type: object
+                      properties:
+                        key: { type: string }
+                        reason: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/households/import:
+    post:
+      tags: [Case graph]
+      summary: Import a household from a live connector record
+      description: |
+        Reads one record from the organization's live Apricot 360 and turns it
+        into a household whose facts are sourced `connector`. Only fields in
+        the connection's reviewed mapping become facts; unmapped fields are
+        counted and dropped. Read-only: nothing is written back to Apricot.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [connectionId, recordId]
+              additionalProperties: false
+              properties:
+                connectionId: { type: string, maxLength: 200 }
+                recordId: { type: string, pattern: '^\d{1,12}$' }
+                externalRef:
+                  type: string
+                  maxLength: 200
+                  description: Defaults to `<connectionId>:<recordId>`.
+      responses:
+        '201':
+          description: Imported.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  household: { $ref: '#/components/schemas/HouseholdRef' }
+                  factsWritten: { type: integer }
+                  unmappedFieldCount: { type: integer }
+                  observedAt: { type: string, format: date-time }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The connection is in local-demo mode.
+        '501':
+          description: No adapter exists for this provider.
+        '502':
+          description: The provider could not be read.
+        '503':
+          description: The connection's credentials are not configured.
+
+  /v1/households/{id}:
+    get:
+      tags: [Case graph]
+      summary: Household summary
+      description: Members, fact counts, and every run against it. Returns no values.
+      parameters: [{ $ref: '#/components/parameters/uuidId' }]
+      responses:
+        '200':
+          description: The summary.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/households/{id}/facts:
+    get:
+      tags: [Case graph]
+      summary: Current facts, or one key's history
+      description: |
+        The ledger is append-only, so "current" is a resolution rather than a
+        column: a correction inserts a row pointing at what it superseded.
+        Passing `key` returns that key's full history, which is how "what did we
+        believe, when, and on whose word" is answered after the fact.
+      parameters:
+        - { $ref: '#/components/parameters/uuidId' }
+        - name: key
+          in: query
+          schema: { type: string }
+          description: Return full history for this key instead of current values.
+        - name: reveal
+          in: query
+          schema: { type: boolean, default: false }
+          description: 'Unmask sensitive values. Reflected in the response as `masked`.'
+      responses:
+        '200': { description: Facts, masked unless `reveal=true`. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Case graph]
+      summary: Append facts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [facts]
+              additionalProperties: false
+              properties:
+                facts:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items: { $ref: '#/components/schemas/FactInput' }
+      parameters: [{ $ref: '#/components/parameters/uuidId' }]
+      responses:
+        '200': { description: All facts written. }
+        '207':
+          description: |
+            Some facts were refused. Always because the key may not be inferred.
+            Distinguished from 200 so a partner that treats success as
+            "everything written" is not quietly wrong.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # Completion
+  # ---------------------------------------------------------------------------
+  /v1/applications:
+    get:
+      tags: [Completion]
+      summary: The work queue
+      responses:
+        '200': { description: Applications, most recently updated first. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Completion]
+      summary: Start a run
+      description: |
+        Picks the path. Report `probeResults` from the live page and, if every
+        playbook probe resolved to exactly one element, the response carries a
+        deterministic fill plan — `executionMode: script`, no model. Otherwise
+        the run needs the agent, and `agentApiKey` starts it.
+
+        Programs served by one site are one run. BenefitsCal serves CalFresh,
+        Medi-Cal, and CalWORKs together. Selecting programs across two sites is
+        refused rather than silently fanned out.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [householdId, programIds]
+              additionalProperties: false
+              properties:
+                householdId: { type: string, format: uuid }
+                programIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 10
+                  items: { type: string, example: wic }
+                probeResults:
+                  type: array
+                  description: |
+                    One entry per playbook probe. `count` must be exactly 1 —
+                    a selector that now matches two elements is as unsafe to
+                    replay as one that matches none.
+                  items:
+                    type: object
+                    required: [selector, count]
+                    properties:
+                      selector: { type: string }
+                      count: { type: integer, minimum: 0 }
+                agentApiKey:
+                  type: string
+                  description: Required to start a cold run.
+      responses:
+        '201':
+          description: Warm run. The response carries the fill plan.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WarmRunStarted' }
+        '202':
+          description: Cold run started, or awaiting an agent key.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502': { $ref: '#/components/responses/UpstreamFailure' }
+
+  /v1/applications/{id}/fields:
+    post:
+      tags: [Completion]
+      summary: Report readbacks
+      description: |
+        The only thing that turns a planned write into a verified one.
+
+        Report what each control actually contained after the write. A value
+        that matched is verified; a value that did not becomes a gap, because a
+        write that did not land is indistinguishable from a value nobody has.
+
+        This exists because the failure it catches is silent: a masked input
+        rejects a direct assignment and reports success anyway, so a packet built
+        on intentions claims eighteen filled fields when eleven landed.
+      parameters: [{ $ref: '#/components/parameters/uuidId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [readbacks]
+              additionalProperties: false
+              properties:
+                readbacks:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: object
+                    required: [fieldKey, landedValue]
+                    properties:
+                      fieldKey: { type: string }
+                      landedValue:
+                        type: string
+                        nullable: true
+                        description: What the control held after the write.
+      responses:
+        '200': { description: Verification recorded. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: The application is already recorded as submitted. }
+
+  /v1/applications/{id}/gaps:
+    get:
+      tags: [Completion]
+      summary: Open questions
+      description: |
+        The BLOCKED translation. In the multi-agent design a fill agent that
+        needs a value stops and returns a BLOCKED report for the orchestrator to
+        ask a human about. There is no human on an API, so the question is
+        recorded here and you answer it.
+
+        `kind: decision` means a human's judgment is the point — a protected
+        field, or a choice among options — rather than that a lookup failed.
+      parameters:
+        - { $ref: '#/components/parameters/uuidId' }
+        - name: all
+          in: query
+          schema: { type: boolean, default: false }
+          description: Include answered gaps.
+      responses:
+        '200': { description: The gaps. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Completion]
+      summary: Answer gaps
+      description: |
+        Each answer becomes a `Fact` sourced `caseworker` or `participant`, so an
+        answered gap carries provenance exactly as a connector value does. That
+        is what keeps the protected fields honest: unfillable by inference,
+        fillable by a person, and the packet can tell which happened.
+
+        An answer to a select must be one of the options the control offers,
+        otherwise the write would fail on the page after this endpoint had
+        already reported success.
+
+        Supply `agentApiKey` to resume a cold run on its existing session rather
+        than starting a new one that re-reads the whole form.
+      parameters: [{ $ref: '#/components/parameters/uuidId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [answers]
+              additionalProperties: false
+              properties:
+                answers:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [gapId, value, source, answeredBy]
+                    properties:
+                      gapId: { type: string, format: uuid }
+                      value: { $ref: '#/components/schemas/FactValue' }
+                      source:
+                        type: string
+                        enum: [caseworker, participant]
+                        description: Who said so. An answer without an answerer has no provenance.
+                      answeredBy: { type: string, maxLength: 200 }
+                      note: { type: string, maxLength: 500 }
+                agentApiKey: { type: string }
+      responses:
+        '200': { description: All answers accepted. }
+        '207': { description: Some answers were refused; see `invalid`. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: The application is already recorded as submitted. }
+
+  /v1/applications/{id}/packet:
+    get:
+      tags: [Completion]
+      summary: The review-ready packet
+      description: |
+        Every field in form order with value, control type, options, whether the
+        form requires it, whether the write was verified by readback, and a
+        provenance object pointing at the fact it came from.
+
+        `verified: false` on a filled field means the value was entered but never
+        read back. It is surfaced rather than rounded up, because it is the
+        failure a reviewer cannot catch by looking — the packet looks complete.
+
+        Values are masked unless `reveal=true`, and asking to reveal is audited.
+      parameters:
+        - { $ref: '#/components/parameters/uuidId' }
+        - name: reveal
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: The packet.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Packet' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/applications/{id}/events:
+    get:
+      tags: [Completion]
+      summary: Run events (SSE)
+      description: |
+        Server-Sent Events adapted from the agent runtime's NDJSON stream. SSE
+        so a browser consumer gets `EventSource` and its reconnection behavior.
+
+        Only a cold run has a stream; a warm run is one deterministic pass. A
+        warm run returns 409 with the reason rather than an empty stream a client
+        would wait on forever.
+      parameters:
+        - { $ref: '#/components/parameters/uuidId' }
+        - name: agentApiKey
+          in: query
+          schema: { type: string }
+          description: For `EventSource`, which cannot set headers. Prefer `Authorization`.
+      responses:
+        '200':
+          description: The event stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: This run has no stream. }
+
+  /v1/applications/{id}/metrics:
+    get:
+      tags: [Completion]
+      summary: Cost and quality
+      description: |
+        `executionMode` is the number that matters: the unit of cost is the turn,
+        so a run's cost is attributable to whether it replayed a script or drove
+        a model, and that to a playbook version. A cost regression after a site
+        change becomes "which playbook went stale" rather than a mystery.
+      parameters: [{ $ref: '#/components/parameters/uuidId' }]
+      responses:
+        '200': { description: Metrics and the audit timeline. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # Review
+  # ---------------------------------------------------------------------------
+  /v1/applications/{id}/review:
+    post:
+      tags: [Review]
+      summary: Record a human review
+      description: |
+        A `confirmed` action is the attestation the submit gate requires, and it
+        names a person. It is refused while blockers remain: an attestation over
+        known-incomplete data is worth nothing.
+      parameters: [{ $ref: '#/components/parameters/uuidId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, reviewerPrincipal]
+              additionalProperties: false
+              properties:
+                action: { type: string, enum: [viewed, edited, confirmed] }
+                reviewerPrincipal: { type: string, maxLength: 200 }
+                fieldKey: { type: string }
+                attestation: { type: string, maxLength: 1000 }
+      responses:
+        '201': { description: Recorded. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: The packet cannot be confirmed yet; blockers are listed. }
+
+  /v1/applications/{id}/submit:
+    post:
+      tags: [Review]
+      summary: Record that a human submitted
+      description: |
+        **This does not submit anything.** No code path in this service activates
+        a submit control, and there is no agent tool that does.
+
+        A benefits application is a legal attestation by the participant about
+        their own household. Income, household composition, and immigration
+        status are sworn to, and a false statement has consequences for the
+        participant rather than for the tool. Nobody has delegated that, and it
+        is not delegable.
+
+        What this records is the start of the outcome loop: an application with a
+        known submission time can be followed to an approval or a denial, which
+        is the only way to learn whether a filled packet was a *correct* one.
+        That record must have a human in it, which is what the gate enforces.
+
+        Returns 409 unless a reviewer has confirmed, every required field is
+        filled, every value was verified by readback, and no required question is
+        unanswered. A database trigger enforces the same rule; if the two
+        disagree the trigger wins and the request fails.
+      parameters: [{ $ref: '#/components/parameters/uuidId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [submittedBy]
+              additionalProperties: false
+              properties:
+                submittedBy:
+                  type: string
+                  maxLength: 200
+                  description: The person who submitted on the site.
+                confirmationNumber: { type: string, maxLength: 200 }
+      responses:
+        '200': { description: Submission recorded. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: The gate refused. Blockers are listed in `error`. }
+
+  # ---------------------------------------------------------------------------
+  # Work queue
+  # ---------------------------------------------------------------------------
+  /v1/applications/{id}/lease:
+    post:
+      tags: [Work queue]
+      summary: Acquire or renew a lease
+      description: |
+        The lease is server-side because two caseworkers in two browsers cannot
+        see each other's local state — a client-side lease is a convention, and
+        this one is a row taken under `SELECT ... FOR UPDATE`.
+
+        An expired lease is takeable: a tab closed mid-run leaves a lease with
+        nobody to release it, and the alternative is an application nobody can
+        touch. TTL is clamped to 5s–10min, so hold it by renewing rather than by
+        asking for a long lease.
+      parameters: [{ $ref: '#/components/parameters/uuidId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [holder]
+              additionalProperties: false
+              properties:
+                holder: { type: string, maxLength: 200 }
+                ttlMs: { type: integer, minimum: 5000, maximum: 600000, default: 120000 }
+      responses:
+        '200': { description: Acquired or renewed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: Someone else holds it. Retryable. }
+    delete:
+      tags: [Work queue]
+      summary: Release a lease
+      parameters: [{ $ref: '#/components/parameters/uuidId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [holder]
+              additionalProperties: false
+              properties:
+                holder: { type: string, maxLength: 200 }
+      responses:
+        '200': { description: Released. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: This holder does not hold the lease. }
+
+  /v1/applications/{id}/handoff:
+    post:
+      tags: [Work queue]
+      summary: Hand off, or accept a handoff
+      description: |
+        Two steps on purpose. `create` hands over and `accept` picks up, and
+        between them nobody may lease it — so an application is never in the
+        state where the first person has moved on and the second does not know
+        they own it.
+      parameters: [{ $ref: '#/components/parameters/uuidId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [action, fromPrincipal, toPrincipal]
+                  additionalProperties: false
+                  properties:
+                    action: { type: string, enum: [create] }
+                    fromPrincipal: { type: string, maxLength: 200 }
+                    toPrincipal: { type: string, maxLength: 200 }
+                    note: { type: string, maxLength: 500 }
+                - type: object
+                  required: [action, toPrincipal]
+                  additionalProperties: false
+                  properties:
+                    action: { type: string, enum: [accept] }
+                    toPrincipal: { type: string, maxLength: 200 }
+      responses:
+        '200': { description: Accepted, and the lease was taken in the same transaction. }
+        '201': { description: Handoff created and pending. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: No pending handoff, or it is addressed to someone else. }
+
+  /v1/applications/{id}/resume:
+    post:
+      tags: [Work queue]
+      summary: May a paused run continue?
+      description: |
+        Describe what you can see; get a verdict. Only `verified` permits
+        continuing.
+
+        Refusing on a changed page is not caution for its own sake: resuming
+        against a page whose structure moved is precisely how a value lands in
+        the wrong field, and that failure is silent — the write succeeds, the
+        packet looks complete, and the wrong number is in the wrong box.
+      parameters: [{ $ref: '#/components/parameters/uuidId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [holder]
+              additionalProperties: false
+              properties:
+                holder: { type: string, maxLength: 200 }
+                location: { type: string, nullable: true, maxLength: 2000 }
+                pageSignatureHash: { type: string, nullable: true, maxLength: 128 }
+                tabOpen: { type: boolean }
+                sourceFreshness: { type: string, enum: [fresh, stale, unknown, expired] }
+      responses:
+        '200':
+          description: The verdict.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  outcome:
+                    type: string
+                    enum:
+                      - verified
+                      - source_expired
+                      - source_stale
+                      - tab_closed
+                      - location_changed
+                      - page_changed
+                      - handoff_pending
+                  canContinue: { type: boolean }
+                  checkpointKind:
+                    type: string
+                    nullable: true
+                    enum:
+                      - tab_closed
+                      - source_expired
+                      - source_stale
+                      - page_changed
+                      - handoff
+                      - voluntary_pause
+                  reason: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: This caller does not hold a current lease. }
+
+  # ---------------------------------------------------------------------------
+  # Catalog
+  # ---------------------------------------------------------------------------
+  /v1/programs:
+    get:
+      tags: [Catalog]
+      summary: Programs, with playbook status
+      description: |
+        `expectedExecutionMode` tells you what a run will cost before you start
+        it. A program with no playbook, or a stale one, takes the model path.
+      responses:
+        '200': { description: The catalog. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/programs/{slug}/playbook:
+    get:
+      tags: [Catalog]
+      summary: Probes, field map, and advance rules
+      description: |
+        These are hardcoded in the extension bundle today, which means a site
+        change needs a Chrome Web Store release before a caseworker can run
+        again. Serving them makes a site change a data update.
+      parameters: [{ $ref: '#/components/parameters/programSlug' }]
+      responses:
+        '200':
+          description: 'The playbook, or null with `expectedExecutionMode` set to model.'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Catalog]
+      summary: Report probe results
+      description: |
+        Returns the routing verdict and marks the playbook stale on a miss, which
+        is what wakes the scribe.
+
+        A probe must resolve to **exactly one** element. A count above one fails,
+        because a selector that has become ambiguous is as unsafe to replay as
+        one that has disappeared — writing to the wrong one of two matches is a
+        silent failure.
+      parameters: [{ $ref: '#/components/parameters/programSlug' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [probeResults]
+              additionalProperties: false
+              properties:
+                probeResults:
+                  type: array
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [selector, count]
+                    properties:
+                      selector: { type: string }
+                      count: { type: integer, minimum: 0 }
+      responses:
+        '200': { description: The verdict. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # Audit
+  # ---------------------------------------------------------------------------
+  /v1/audit/export:
+    get:
+      tags: [Audit]
+      summary: Export the audit trail
+      description: |
+        Emitted in the extension's `nava.form-filling.audit.v1` schema, so an
+        existing consumer reads this without change.
+
+        Durability is the point: the extension's own export covers one browser
+        profile's history, which is the wrong unit. A county asking "who looked
+        at this participant's record" wants an answer across every caseworker and
+        every device, after the browser that did the looking is gone.
+
+        No event can carry a participant value. `details` is constrained by a
+        CHECK constraint to five counts and four status enums, so the guarantee
+        holds against any writer — including one added later that forgets.
+
+        Exporting is itself audited. Otherwise "who pulled the access log" is the
+        one question the access log cannot answer.
+      parameters:
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: The export.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  schema: { type: string, enum: [nava.form-filling.audit.v1] }
+                  tenant: { type: string }
+                  exportedAt: { type: string, format: date-time }
+                  truncated: { type: boolean }
+                  events:
+                    type: array
+                    items: { $ref: '#/components/schemas/AuditEvent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+components:
+  securitySchemes:
+    bearerKey:
+      type: http
+      scheme: bearer
+      description: |
+        `Authorization: Bearer nava_<keyId>_<secret>`. Only an HMAC of the secret
+        is stored, so a database disclosure yields no usable keys.
+
+        The connector endpoints additionally accept an organization session
+        cookie, because the extension sends `credentials: 'include'` and no
+        Authorization header. The production mechanism is GCP
+        Identity Platform tenants with per-tenant SAML/OIDC and discovery by
+        email domain.
+
+  parameters:
+    connectionId:
+      name: connectionId
+      in: path
+      required: true
+      schema: { type: string }
+      description: Opaque connection identifier the extension stores.
+    uuidId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    programSlug:
+      name: slug
+      in: path
+      required: true
+      schema: { type: string, enum: [calfresh, medical, calworks, wic, ihss] }
+
+  schemas:
+    Error:
+      type: object
+      required: [ok, error]
+      properties:
+        ok: { type: boolean, enum: [false] }
+        error:
+          type: string
+          description: |
+            Deliberately generic. Detail goes to the log under `traceId` — a
+            detailed error is both an oracle and a channel for participant data
+            to escape.
+        traceId: { type: string }
+
+    FactValue:
+      description: A scalar, or a list of scalars for a multi-select.
+      oneOf:
+        - { type: string, maxLength: 2000 }
+        - { type: number }
+        - { type: boolean }
+        - { type: string, nullable: true }
+        - { type: array, maxItems: 50, items: { type: string } }
+
+    FactSource:
+      type: string
+      enum: [connector, document, caseworker, participant, page, inferred]
+      description: |
+        `connector` the organization's system of record · `document` extracted
+        from an upload · `caseworker` typed this session · `participant` given
+        directly · `page` already on the form, not written by us · `inferred`
+        derived from other facts, and forbidden for a protected key.
+
+    FactInput:
+      type: object
+      required: [key, value, source]
+      additionalProperties: false
+      properties:
+        key:
+          type: string
+          description: A canonical fact key. Free text is refused at the door.
+        value: { $ref: '#/components/schemas/FactValue' }
+        source: { $ref: '#/components/schemas/FactSource' }
+        sourceDetail:
+          type: string
+          maxLength: 500
+          description: |
+            Required in practice for `inferred`: state the input and the rule.
+            "Riverside County, from ZIP 92595" is checkable. "Inferred" is not.
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        observedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        consentScope: { type: string, maxLength: 200 }
+        confirmedBy: { type: string, maxLength: 200 }
+
+    HouseholdRef:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        externalRef: { type: string }
+        connectionId: { type: string, nullable: true }
+        recordId: { type: string, nullable: true }
+
+    WarmRunStarted:
+      type: object
+      properties:
+        ok: { type: boolean }
+        application:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+            status: { type: string }
+            executionMode: { type: string, enum: [script] }
+            url: { type: string }
+            allowedOrigins: { type: array, items: { type: string } }
+            allowedPathPrefixes: { type: array, items: { type: string } }
+        plan:
+          type: object
+          properties:
+            playbookId: { type: string, format: uuid }
+            playbookVersion: { type: integer }
+            staleUsed:
+              type: array
+              items: { type: string }
+              description: Keys whose facts are stale. Say so to the reviewer.
+            writes:
+              type: array
+              items:
+                type: object
+                properties:
+                  fieldKey: { type: string }
+                  label: { type: string }
+                  purpose: { type: string, nullable: true }
+                  value: { type: string }
+                  inputType: { type: string }
+                  method:
+                    type: string
+                    enum: [value, keys]
+                    description: |
+                      `keys` for a masked control. A direct assignment is
+                      frequently rejected by the mask's own handler, which
+                      reports success anyway.
+                  factId: { type: string, format: uuid }
+                  provenance:
+                    type: object
+                    properties:
+                      source: { $ref: '#/components/schemas/FactSource' }
+                      detail: { type: string, nullable: true }
+                      freshness: { type: string, enum: [fresh, stale, unknown] }
+        gapCount: { type: integer }
+        next: { type: string }
+
+    Packet:
+      type: object
+      properties:
+        ok: { type: boolean }
+        masked: { type: boolean }
+        fields:
+          type: array
+          items:
+            type: object
+            properties:
+              ordinal: { type: integer }
+              fieldKey: { type: string }
+              label: { type: string }
+              purpose: { type: string, nullable: true }
+              value: { type: string, nullable: true }
+              inputType: { type: string }
+              options: { type: array, nullable: true, items: { type: string } }
+              required: { type: boolean }
+              verified:
+                type: boolean
+                description: A readback confirmed the value landed. False is meaningful.
+              provenance:
+                type: object
+                nullable: true
+                properties:
+                  source: { $ref: '#/components/schemas/FactSource' }
+                  legacySource:
+                    type: string
+                    enum: [database, caseworker, inferred, missing]
+                    description: labs-asp's narrower enum, so an existing renderer still works.
+                  detail: { type: string, nullable: true }
+                  factId: { type: string, format: uuid, nullable: true }
+                  observedAt: { type: string, format: date-time, nullable: true }
+                  confirmedBy: { type: string, nullable: true }
+                  confidence: { type: number, nullable: true }
+        gaps: { type: array, items: { type: object } }
+        summary:
+          type: object
+          properties:
+            fieldCount: { type: integer }
+            filledCount: { type: integer }
+            verifiedCount: { type: integer }
+            provenanceShare:
+              type: number
+              nullable: true
+              description: |
+                The pilot measure. A value cannot be stored without provenance,
+                so below 1 means fields are unfilled — not untraceable.
+            openGapCount: { type: integer }
+            requiredUnfilledCount: { type: integer }
+        gate:
+          type: object
+          properties:
+            readyForReview: { type: boolean }
+            blockers: { type: array, items: { type: string } }
+            reviewerPrincipal: { type: string, nullable: true }
+            attestedAt: { type: string, format: date-time, nullable: true }
+
+    AuditEvent:
+      type: object
+      properties:
+        id: { type: integer }
+        at: { type: string, format: date-time }
+        type:
+          type: string
+          enum:
+            - application_added
+            - source_loaded
+            - questions_required
+            - fill_started
+            - page_verified
+            - safe_advance
+            - checkpoint_reached
+            - resume_verified
+            - resume_rejected
+            - handoff_created
+            - handoff_accepted
+            - review_reached
+            - tab_closed
+            - source_reloaded
+            - session_ended
+            - audit_exported
+        principalId: { type: string }
+        applicationId: { type: string, format: uuid, nullable: true }
+        connectionId: { type: string, nullable: true }
+        recordId: { type: string, nullable: true }
+        outcome: { type: string, nullable: true }
+        details:
+          type: object
+          description: |
+            Counts and status enums only, enforced by a CHECK constraint. Allowed
+            keys: fieldCount, gapCount, verifiedCount, blockedCount, pageCount,
+            checkpointKind, resumeOutcome, fromStatus, toStatus.
+          additionalProperties: { oneOf: [{ type: integer }, { type: string }] }
+
+  responses:
+    BadRequest:
+      description: The request was malformed.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: |
+        Not authorized. Never distinguishes an unknown key from a bad secret from
+        a revoked one — the difference is an oracle.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: |
+        Not found. Row-level security scopes every read to the caller's tenant,
+        so another organization's resource is indistinguishable from one that
+        does not exist. That is the intended answer.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: Too many requests. Carries `Retry-After`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    AdapterUnavailable:
+      description: |
+        No authorized adapter for this provider. An adapter requires an
+        organization grant, a security review, and a data-processing agreement.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    UpstreamFailure:
+      description: A dependency failed. Detail is in the log under `traceId`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
