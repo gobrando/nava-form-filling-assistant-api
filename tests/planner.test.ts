@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { allowedNext, validateOutcomeInput } from '@/lib/casegraph/outcomes';
+import { briefForAgent, conservativeDecisions, hintedDecisions } from '@/lib/planner/brief';
 import {
   GOLDEN_ALLOWED,
   GOLDEN_CASE,
@@ -172,6 +173,80 @@ describe('planner scoring', () => {
     );
     expect(estimateCostUsd('gpt-5-mini', { inputTokens: 0, outputTokens: 1_000_000 })).toBe(2);
     expect(estimateCostUsd('unknown', { inputTokens: 1, outputTokens: 1 })).toBeNull();
+  });
+
+  it('keeps a wrong confident mapping out of the Eve brief', () => {
+    const fields = [
+      {
+        fieldKey: 'signature_date',
+        type: 'date',
+        label: 'Signature date',
+        question: 'Date signed',
+        required: true,
+        alreadyFilled: false,
+        purposeHint: '',
+        options: [],
+      },
+    ];
+    const sources = [
+      { purpose: 'dateOfBirth', label: 'Date of birth', kind: 'date', sensitive: false },
+    ];
+    const decisions = conservativeDecisions(
+      [
+        {
+          fieldKey: 'signature_date',
+          action: 'map',
+          purpose: 'dateOfBirth',
+          confidence: 0.91,
+        },
+      ],
+      fields,
+      sources,
+    );
+    const brief = briefForAgent(decisions, fields);
+    expect(brief).toContain('Inspect');
+    expect(brief).not.toContain('900-12-3456');
+    expect(brief).not.toContain('from the dateOfBirth source');
+    const hinted = hintedDecisions(
+      [{ fieldKey: 'applicant_first', action: 'uncertain', purpose: null, confidence: 0.4 }],
+      [
+        {
+          fieldKey: 'applicant_first',
+          type: 'text',
+          label: 'Applicant first name',
+          question: 'What is your first name?',
+          required: true,
+          alreadyFilled: false,
+          purposeHint: 'firstName',
+          options: [],
+        },
+      ],
+      [{ purpose: 'firstName', label: 'First name', kind: 'string', sensitive: false }],
+      new Set(['firstName']),
+    );
+    expect(
+      briefForAgent(hinted, [
+        {
+          fieldKey: 'applicant_first',
+          type: 'text',
+          label: 'Applicant first name',
+          question: 'What is your first name?',
+          required: true,
+          alreadyFilled: false,
+          purposeHint: 'firstName',
+          options: [],
+        },
+      ]),
+    ).toContain('from the firstName source');
+    expect(sensitiveControl(fields[0])).toBe(false);
+    expect(
+      sensitiveControl({
+        ...fields[0],
+        fieldKey: 'cin',
+        label: 'Medi-Cal number',
+        question: 'Medi-Cal number',
+      }),
+    ).toBe(true);
   });
 });
 

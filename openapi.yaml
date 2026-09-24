@@ -432,6 +432,25 @@ paths:
                 agentApiKey:
                   type: string
                   description: Required to start a cold run.
+                inventory:
+                  type: object
+                  description: |
+                    Redacted page inventory. When a TypeSafe key is configured,
+                    Jev classifies the controls and the cold-path message lists
+                    map, ask, and leave. Values are not part of this object.
+                questions:
+                  type: array
+                  maxItems: 40
+                  description: |
+                    Questions stored as gaps so a participant share can ask them.
+                  items:
+                    type: object
+                    required: [fieldKey, question]
+                    properties:
+                      fieldKey: { type: string }
+                      question: { type: string }
+                      label: { type: string }
+                      required: { type: boolean }
       responses:
         '201':
           description: Warm run. The response carries the fill plan.

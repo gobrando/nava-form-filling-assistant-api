@@ -1,13 +1,17 @@
 import { recordAudit } from '@/lib/audit';
 import { currentFacts } from '@/lib/casegraph/facts';
+import { reportGaps } from '@/lib/casegraph/gaps';
 import { buildFillPlan, persistPlan } from '@/lib/casegraph/plan';
 import { withTenant } from '@/lib/db';
 import { application, household } from '@/lib/db/schema';
 import { startRun } from '@/lib/eve/client';
 import { guard } from '@/lib/guard';
 import { fail, ok, preflight, readJson } from '@/lib/http';
+import { briefForAgent, conservativeDecisions, hintedDecisions } from '@/lib/planner/brief';
+import { decideFields, estimateJevCostUsd, jevKey } from '@/lib/planner/jev';
+import { allowedPurposeSet } from '@/lib/planner/run';
 import { evaluateProbes, resolvePlaybookForProgram } from '@/lib/playbooks/registry';
-import { planWorkflows } from '@/lib/vocabulary';
+import { inputTypeSchema, planWorkflows } from '@/lib/vocabulary';
 import { desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 
@@ -36,6 +40,60 @@ const postSchema = z
       .optional(),
     /** Required to start a cold run: the agent channel needs a credential. */
     agentApiKey: z.string().min(16).max(256).optional(),
+    /**
+     * Redacted page inventory. When Jev is configured, the cold path is told
+     * which controls to map, ask, or leave before Eve surveys the site.
+     */
+    inventory: z
+      .object({
+        page: z.object({ domain: z.string().min(1).max(160) }).strict(),
+        fields: z
+          .array(
+            z
+              .object({
+                fieldKey: z.string().min(1).max(180),
+                type: z.string().max(40),
+                label: z.string().max(240),
+                question: z.string().max(240),
+                required: z.boolean(),
+                alreadyFilled: z.boolean(),
+                purposeHint: z.string().max(100),
+                options: z.array(z.string().max(120)).max(30),
+              })
+              .strict(),
+          )
+          .max(80),
+        sources: z
+          .array(
+            z
+              .object({
+                purpose: z.string().min(1).max(100),
+                label: z.string().max(200),
+                kind: z.string().max(40),
+                sensitive: z.boolean(),
+              })
+              .strict(),
+          )
+          .max(80),
+      })
+      .strict()
+      .optional(),
+    /** Questions the client still has to answer. Stored as gaps, then shareable. */
+    questions: z
+      .array(
+        z
+          .object({
+            fieldKey: z.string().min(1).max(180),
+            label: z.string().max(200).optional(),
+            question: z.string().min(1).max(240),
+            required: z.boolean().optional(),
+            inputType: inputTypeSchema.optional(),
+            options: z.array(z.string().max(120)).max(20).optional(),
+          })
+          .strict(),
+      )
+      .max(40)
+      .optional(),
   })
   .strict();
 
@@ -61,6 +119,40 @@ export async function POST(request: Request) {
     );
   }
   const workflow = workflows[0];
+
+  let jevBrief = '';
+  let jevSummary: { decided: number; deferred: number; apiCostUsd: number } | null = null;
+  if (body.inventory && jevKey()) {
+    try {
+      const pass = await decideFields({
+        page: body.inventory.page,
+        fields: body.inventory.fields,
+        sources: body.inventory.sources,
+        allowedPurposes: allowedPurposeSet(),
+      });
+      if (pass) {
+        const decisions = conservativeDecisions(
+          hintedDecisions(
+            pass.decisions,
+            body.inventory.fields,
+            body.inventory.sources,
+            allowedPurposeSet(),
+          ),
+          body.inventory.fields,
+          body.inventory.sources,
+        );
+        jevBrief = briefForAgent(decisions, body.inventory.fields);
+        const deferred = decisions.filter((item) => item.action === 'uncertain').length;
+        jevSummary = {
+          decided: decisions.length - deferred,
+          deferred,
+          apiCostUsd: estimateJevCostUsd(pass.inputTokens),
+        };
+      }
+    } catch {
+      jevBrief = '';
+    }
+  }
 
   return withTenant(auth.tenantId, async (tx) => {
     const found = await tx
@@ -108,6 +200,10 @@ export async function POST(request: Request) {
       outcome: verdict.executionMode,
     });
 
+    if (body.questions?.length) {
+      await reportGaps(tx, auth.tenantId, row.id, body.questions);
+    }
+
     // --- Warm path: deterministic, no model ---------------------------------
     if (verdict.passed && playbook) {
       const facts = await currentFacts(tx, body.householdId);
@@ -143,6 +239,7 @@ export async function POST(request: Request) {
           gapCount: plan.gaps.length,
           // Said explicitly because the plan is an intention, not an outcome.
           next: 'Execute the plan, then report readbacks to POST /v1/applications/{id}/fields.',
+          jev: jevSummary,
         },
         { status: 201, origin },
       );
@@ -165,6 +262,8 @@ export async function POST(request: Request) {
           started: false,
           reason: verdict.reason,
           next: 'This site needs the agent. Retry with agentApiKey to start it.',
+          jev: jevSummary,
+          brief: jevBrief || null,
         },
         { status: 202, origin },
       );
@@ -178,7 +277,10 @@ export async function POST(request: Request) {
         playbook
           ? `A playbook exists at version ${playbook.version} but is not fresh. Confirm its field map rather than rebuilding it, and note which selectors moved.`
           : 'There is no playbook for this site. Survey it, then have the scribe write one.',
-      ].join('\n'),
+        jevBrief,
+      ]
+        .filter(Boolean)
+        .join('\n'),
       apiKey: body.agentApiKey,
       tenantId: auth.tenantId,
       applicationId: row.id,
@@ -219,6 +321,7 @@ export async function POST(request: Request) {
         started: true,
         sessionId: started.sessionId,
         reason: verdict.reason,
+        jev: jevSummary,
         next: `Follow GET /v1/applications/${row.id}/events.`,
       },
       { status: 202, origin },
