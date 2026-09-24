@@ -1,0 +1,1989 @@
+diff --git a/README.md b/README.md
+index 853c5b2..a55e77d 100644
+--- a/README.md
++++ b/README.md
+@@ -128,6 +128,18 @@ Test the connection, review the label-based mapping, save it, retrieve fictional
+ 
+ The production service contract and required security controls are documented in [`connector-service/README.md`](connector-service/README.md). The [connector coverage matrix](docs/CONNECTOR_COVERAGE.md) explains why this is not yet a Plaid-like production network.
+ 
++## Dry-run a playbook repair
++
++When a benefits page has changed and you still have that page open, the side panel can ask the Nava API to repair the playbook without a model.
++
++1. On the start screen, save the shared planner API address and a tenant key.
++2. Choose the program the way you already start an application. The repair uses that program id (`wic`, `ihss`, `calfresh`, `medical`, or `calworks`). A BenefitsCal application that includes more than one of CalFresh, Medi-Cal, and CalWORKs sends the first id you selected. The API looks up the playbook that includes it. The extension does not guess a program from the page address.
++3. On the application card, choose **Dry-run a playbook repair**. The extension reads a selector, the accessible label, the input type, and how many elements that selector matches. It does not read or send what is typed in the boxes, including placeholder text.
++4. The panel shows what stayed in the same place, what moved, what was not repaired, and what was left off the map. Nothing is saved.
++5. **Publish this repair** appears only when the API says the repair can be published. Confirm it in the panel before anything is written. Publishing saves a new version for your organization and leaves the shared playbook unchanged. The form is not submitted.
++
++If the API cannot be reached, the panel says so. It does not invent a field map.
++
+ ## Checks
+ 
+ ```bash
+diff --git a/background.js b/background.js
+index 42da10f..2138f52 100644
+--- a/background.js
++++ b/background.js
+@@ -10,7 +10,7 @@ const QUEUE_STORAGE_KEY = 'nava:work-queue';
+ const LEASE_STORAGE_KEY = 'nava:application-leases';
+ const SESSION_STORAGE_KEY = 'nava:session';
+ const COORDINATOR_STORAGE_KEY = 'nava:assistant-coordinator';
+-const APPLICATION_COMMAND_TYPES = new Set(['NAVA_SCAN', 'NAVA_FILL', 'NAVA_NAVIGATION_STATUS', 'NAVA_ADVANCE']);
++const APPLICATION_COMMAND_TYPES = new Set(['NAVA_SCAN', 'NAVA_FILL', 'NAVA_NAVIGATION_STATUS', 'NAVA_ADVANCE', 'NAVA_OBSERVE_REPAIR']);
+ const WRITE_COMMAND_TYPES = new Set(['NAVA_FILL', 'NAVA_ADVANCE']);
+ const ACTIVE_LEASE_MS = 2 * 60 * 1000;
+ const COMMAND_LEASE_MS = 10 * 60 * 1000;
+diff --git a/content/form-agent.js b/content/form-agent.js
+index df70381..bc89bb6 100644
+--- a/content/form-agent.js
++++ b/content/form-agent.js
+@@ -1,7 +1,7 @@
+ (function installPageAgent() {
+   'use strict';
+ 
+-  const PAGE_AGENT_VERSION = 5;
++  const PAGE_AGENT_VERSION = 6;
+   if (globalThis.__NAVA_FORM_FILLER_AGENT__?.version === PAGE_AGENT_VERSION) return;
+   globalThis.__NAVA_FORM_FILLER_AGENT__ = { version: PAGE_AGENT_VERSION };
+ 
+@@ -1055,10 +1055,22 @@
+       fillGeneration += 1;
+       return { ok: true, cancelled: true };
+     }
+-    if (['NAVA_SCAN', 'NAVA_FILL', 'NAVA_NAVIGATION_STATUS', 'NAVA_ADVANCE'].includes(message?.type)
++    if (['NAVA_SCAN', 'NAVA_FILL', 'NAVA_NAVIGATION_STATUS', 'NAVA_ADVANCE', 'NAVA_OBSERVE_REPAIR'].includes(message?.type)
+       && !routeAuthorized(message.routePolicy)) {
+       return { ok: false, error: 'The application location changed before this command reached the page. No form action was taken.' };
+     }
++    if (message?.type === 'NAVA_OBSERVE_REPAIR') {
++      const repair = globalThis.NavaRepairObserve;
++      if (!repair?.collectObservations || !repair?.buildRepairRequest) {
++        return { ok: false, error: 'The page observer did not load. Refresh this tab once, then try the dry run again. Nothing was sent.' };
++      }
++      const collected = repair.collectObservations(document);
++      if (!collected || collected.refused) {
++        return { ok: false, error: collected?.refused || 'This page could not be described for a repair. Nothing was sent.' };
++      }
++      const body = repair.buildRepairRequest(collected.observed, false);
++      return { ok: true, observed: body.observed };
++    }
+     if (message?.type === 'NAVA_SCAN') {
+       const fields = scanFields();
+       return {
+diff --git a/manifest.json b/manifest.json
+index dbcae74..d4386cd 100644
+--- a/manifest.json
++++ b/manifest.json
+@@ -37,6 +37,7 @@
+       "js": [
+         "shared/form-engine.js",
+         "shared/site-adapters.js",
++        "shared/repair-observe.js",
+         "content/form-agent.js"
+       ],
+       "run_at": "document_idle",
+diff --git a/package-lock.json b/package-lock.json
+index 0f32e74..e4bc0cd 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -10,10 +10,140 @@
+       "devDependencies": {
+         "@napi-rs/canvas": "^1.0.9",
+         "fflate": "^0.8.3",
++        "jsdom": "^26.1.0",
+         "pdfjs-dist": "^6.3.289",
+         "tesseract.js": "^7.0.0"
+       }
+     },
++    "node_modules/@asamuzakjp/css-color": {
++      "version": "3.2.0",
++      "resolved": "https://registry.npmjs.org/@asamuzakjp/css-color/-/css-color-3.2.0.tgz",
++      "integrity": "sha512-K1A6z8tS3XsmCMM86xoWdn7Fkdn9m6RSVtocUrJYIwZnFVkng/PvkEoWtOWmP+Scc6saYWHWZYbndEEXxl24jw==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "@csstools/css-calc": "^2.1.3",
++        "@csstools/css-color-parser": "^3.0.9",
++        "@csstools/css-parser-algorithms": "^3.0.4",
++        "@csstools/css-tokenizer": "^3.0.3",
++        "lru-cache": "^10.4.3"
++      }
++    },
++    "node_modules/@csstools/color-helpers": {
++      "version": "5.1.0",
++      "resolved": "https://registry.npmjs.org/@csstools/color-helpers/-/color-helpers-5.1.0.tgz",
++      "integrity": "sha512-S11EXWJyy0Mz5SYvRmY8nJYTFFd1LCNV+7cXyAgQtOOuzb4EsgfqDufL+9esx72/eLhsRdGZwaldu/h+E4t4BA==",
++      "dev": true,
++      "funding": [
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/csstools"
++        },
++        {
++          "type": "opencollective",
++          "url": "https://opencollective.com/csstools"
++        }
++      ],
++      "license": "MIT-0",
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@csstools/css-calc": {
++      "version": "2.1.4",
++      "resolved": "https://registry.npmjs.org/@csstools/css-calc/-/css-calc-2.1.4.tgz",
++      "integrity": "sha512-3N8oaj+0juUw/1H3YwmDDJXCgTB1gKU6Hc/bB502u9zR0q2vd786XJH9QfrKIEgFlZmhZiq6epXl4rHqhzsIgQ==",
++      "dev": true,
++      "funding": [
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/csstools"
++        },
++        {
++          "type": "opencollective",
++          "url": "https://opencollective.com/csstools"
++        }
++      ],
++      "license": "MIT",
++      "engines": {
++        "node": ">=18"
++      },
++      "peerDependencies": {
++        "@csstools/css-parser-algorithms": "^3.0.5",
++        "@csstools/css-tokenizer": "^3.0.4"
++      }
++    },
++    "node_modules/@csstools/css-color-parser": {
++      "version": "3.1.0",
++      "resolved": "https://registry.npmjs.org/@csstools/css-color-parser/-/css-color-parser-3.1.0.tgz",
++      "integrity": "sha512-nbtKwh3a6xNVIp/VRuXV64yTKnb1IjTAEEh3irzS+HkKjAOYLTGNb9pmVNntZ8iVBHcWDA2Dof0QtPgFI1BaTA==",
++      "dev": true,
++      "funding": [
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/csstools"
++        },
++        {
++          "type": "opencollective",
++          "url": "https://opencollective.com/csstools"
++        }
++      ],
++      "license": "MIT",
++      "dependencies": {
++        "@csstools/color-helpers": "^5.1.0",
++        "@csstools/css-calc": "^2.1.4"
++      },
++      "engines": {
++        "node": ">=18"
++      },
++      "peerDependencies": {
++        "@csstools/css-parser-algorithms": "^3.0.5",
++        "@csstools/css-tokenizer": "^3.0.4"
++      }
++    },
++    "node_modules/@csstools/css-parser-algorithms": {
++      "version": "3.0.5",
++      "resolved": "https://registry.npmjs.org/@csstools/css-parser-algorithms/-/css-parser-algorithms-3.0.5.tgz",
++      "integrity": "sha512-DaDeUkXZKjdGhgYaHNJTV9pV7Y9B3b644jCLs9Upc3VeNGg6LWARAT6O+Q+/COo+2gg/bM5rhpMAtf70WqfBdQ==",
++      "dev": true,
++      "funding": [
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/csstools"
++        },
++        {
++          "type": "opencollective",
++          "url": "https://opencollective.com/csstools"
++        }
++      ],
++      "license": "MIT",
++      "engines": {
++        "node": ">=18"
++      },
++      "peerDependencies": {
++        "@csstools/css-tokenizer": "^3.0.4"
++      }
++    },
++    "node_modules/@csstools/css-tokenizer": {
++      "version": "3.0.4",
++      "resolved": "https://registry.npmjs.org/@csstools/css-tokenizer/-/css-tokenizer-3.0.4.tgz",
++      "integrity": "sha512-Vd/9EVDiu6PPJt9yAh6roZP6El1xHrdvIVGjyBsHR0RYwNHgL7FJPyIIW4fANJNG6FtyZfvlRPpFI4ZM/lubvw==",
++      "dev": true,
++      "funding": [
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/csstools"
++        },
++        {
++          "type": "opencollective",
++          "url": "https://opencollective.com/csstools"
++        }
++      ],
++      "license": "MIT",
++      "engines": {
++        "node": ">=18"
++      }
++    },
+     "node_modules/@napi-rs/canvas": {
+       "version": "1.0.9",
+       "resolved": "https://registry.npmjs.org/@napi-rs/canvas/-/canvas-1.0.9.tgz",
+@@ -275,6 +405,16 @@
+         "url": "https://github.com/sponsors/Brooooooklyn"
+       }
+     },
++    "node_modules/agent-base": {
++      "version": "7.1.4",
++      "resolved": "https://registry.npmjs.org/agent-base/-/agent-base-7.1.4.tgz",
++      "integrity": "sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">= 14"
++      }
++    },
+     "node_modules/bmp-js": {
+       "version": "0.1.0",
+       "resolved": "https://registry.npmjs.org/bmp-js/-/bmp-js-0.1.0.tgz",
+@@ -282,6 +422,109 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/cssstyle": {
++      "version": "4.6.0",
++      "resolved": "https://registry.npmjs.org/cssstyle/-/cssstyle-4.6.0.tgz",
++      "integrity": "sha512-2z+rWdzbbSZv6/rhtvzvqeZQHrBaqgogqt85sqFNbabZOuFbCVFb8kPeEtZjiKkbrm395irpNKiYeFeLiQnFPg==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "@asamuzakjp/css-color": "^3.2.0",
++        "rrweb-cssom": "^0.8.0"
++      },
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/data-urls": {
++      "version": "5.0.0",
++      "resolved": "https://registry.npmjs.org/data-urls/-/data-urls-5.0.0.tgz",
++      "integrity": "sha512-ZYP5VBHshaDAiVZxjbRVcFJpc+4xGgT0bK3vzy1HLN8jTO975HEbuYzZJcHoQEY5K1a0z8YayJkyVETa08eNTg==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "whatwg-mimetype": "^4.0.0",
++        "whatwg-url": "^14.0.0"
++      },
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/data-urls/node_modules/tr46": {
++      "version": "5.1.1",
++      "resolved": "https://registry.npmjs.org/tr46/-/tr46-5.1.1.tgz",
++      "integrity": "sha512-hdF5ZgjTqgAntKkklYw0R03MG2x/bSzTtkxmIRw/sTNV8YXsCJ1tfLAX23lhxhHJlEf3CRCOCGGWw3vI3GaSPw==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "punycode": "^2.3.1"
++      },
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/data-urls/node_modules/webidl-conversions": {
++      "version": "7.0.0",
++      "resolved": "https://registry.npmjs.org/webidl-conversions/-/webidl-conversions-7.0.0.tgz",
++      "integrity": "sha512-VwddBukDzu71offAQR975unBIGqfKZpM+8ZX6ySk8nYhVoo5CYaZyzt3YBvYtRtO+aoGlqxPg/B87NGVZ/fu6g==",
++      "dev": true,
++      "license": "BSD-2-Clause",
++      "engines": {
++        "node": ">=12"
++      }
++    },
++    "node_modules/data-urls/node_modules/whatwg-url": {
++      "version": "14.2.0",
++      "resolved": "https://registry.npmjs.org/whatwg-url/-/whatwg-url-14.2.0.tgz",
++      "integrity": "sha512-De72GdQZzNTUBBChsXueQUnPKDkg/5A5zp7pFDuQAj5UFoENpiACU0wlCvzpAGnTkj++ihpKwKyYewn/XNUbKw==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "tr46": "^5.1.0",
++        "webidl-conversions": "^7.0.0"
++      },
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/debug": {
++      "version": "4.4.3",
++      "resolved": "https://registry.npmjs.org/debug/-/debug-4.4.3.tgz",
++      "integrity": "sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "ms": "^2.1.3"
++      },
++      "engines": {
++        "node": ">=6.0"
++      },
++      "peerDependenciesMeta": {
++        "supports-color": {
++          "optional": true
++        }
++      }
++    },
++    "node_modules/decimal.js": {
++      "version": "10.6.0",
++      "resolved": "https://registry.npmjs.org/decimal.js/-/decimal.js-10.6.0.tgz",
++      "integrity": "sha512-YpgQiITW3JXGntzdUmyUR1V812Hn8T1YVXhCu+wO3OpS4eU9l4YdD3qjyiKdV6mvV29zapkMeD390UVEf2lkUg==",
++      "dev": true,
++      "license": "MIT"
++    },
++    "node_modules/entities": {
++      "version": "6.0.1",
++      "resolved": "https://registry.npmjs.org/entities/-/entities-6.0.1.tgz",
++      "integrity": "sha512-aN97NXWF6AWBTahfVOIrB/NShkzi5H7F9r1s9mD3cDj4Ko5f2qhhVoYMibXF7GlLveb/D2ioWay8lxI97Ven3g==",
++      "dev": true,
++      "license": "BSD-2-Clause",
++      "engines": {
++        "node": ">=0.12"
++      },
++      "funding": {
++        "url": "https://github.com/fb55/entities?sponsor=1"
++      }
++    },
+     "node_modules/fflate": {
+       "version": "0.8.3",
+       "resolved": "https://registry.npmjs.org/fflate/-/fflate-0.8.3.tgz",
+@@ -289,6 +532,60 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/html-encoding-sniffer": {
++      "version": "4.0.0",
++      "resolved": "https://registry.npmjs.org/html-encoding-sniffer/-/html-encoding-sniffer-4.0.0.tgz",
++      "integrity": "sha512-Y22oTqIU4uuPgEemfz7NDJz6OeKf12Lsu+QC+s3BVpda64lTiMYCyGwg5ki4vFxkMwQdeZDl2adZoqUgdFuTgQ==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "whatwg-encoding": "^3.1.1"
++      },
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/http-proxy-agent": {
++      "version": "7.0.2",
++      "resolved": "https://registry.npmjs.org/http-proxy-agent/-/http-proxy-agent-7.0.2.tgz",
++      "integrity": "sha512-T1gkAiYYDWYx3V5Bmyu7HcfcvL7mUrTWiM6yOfa3PIphViJ/gFPbvidQ+veqSOHci/PxBcDabeUNCzpOODJZig==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "agent-base": "^7.1.0",
++        "debug": "^4.3.4"
++      },
++      "engines": {
++        "node": ">= 14"
++      }
++    },
++    "node_modules/https-proxy-agent": {
++      "version": "7.0.6",
++      "resolved": "https://registry.npmjs.org/https-proxy-agent/-/https-proxy-agent-7.0.6.tgz",
++      "integrity": "sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "agent-base": "^7.1.2",
++        "debug": "4"
++      },
++      "engines": {
++        "node": ">= 14"
++      }
++    },
++    "node_modules/iconv-lite": {
++      "version": "0.6.3",
++      "resolved": "https://registry.npmjs.org/iconv-lite/-/iconv-lite-0.6.3.tgz",
++      "integrity": "sha512-4fCk79wshMdzMp2rH06qWrJE4iolqLhCUH+OiuIgU++RB0+94NlDL81atO7GX55uUKueo0txHNtvEyI6D7WdMw==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "safer-buffer": ">= 2.1.2 < 3.0.0"
++      },
++      "engines": {
++        "node": ">=0.10.0"
++      }
++    },
+     "node_modules/idb-keyval": {
+       "version": "6.3.0",
+       "resolved": "https://registry.npmjs.org/idb-keyval/-/idb-keyval-6.3.0.tgz",
+@@ -296,6 +593,13 @@
+       "dev": true,
+       "license": "Apache-2.0"
+     },
++    "node_modules/is-potential-custom-element-name": {
++      "version": "1.0.1",
++      "resolved": "https://registry.npmjs.org/is-potential-custom-element-name/-/is-potential-custom-element-name-1.0.1.tgz",
++      "integrity": "sha512-bCYeRA2rVibKZd+s2625gGnGF/t7DSqDs4dP7CrLA1m7jKWz6pps0LpYLJN8Q64HtmPKJ1hrN3nzPNKFEKOUiQ==",
++      "dev": true,
++      "license": "MIT"
++    },
+     "node_modules/is-url": {
+       "version": "1.2.4",
+       "resolved": "https://registry.npmjs.org/is-url/-/is-url-1.2.4.tgz",
+@@ -303,6 +607,97 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/jsdom": {
++      "version": "26.1.0",
++      "resolved": "https://registry.npmjs.org/jsdom/-/jsdom-26.1.0.tgz",
++      "integrity": "sha512-Cvc9WUhxSMEo4McES3P7oK3QaXldCfNWp7pl2NNeiIFlCoLr3kfq9kb1fxftiwk1FLV7CvpvDfonxtzUDeSOPg==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "cssstyle": "^4.2.1",
++        "data-urls": "^5.0.0",
++        "decimal.js": "^10.5.0",
++        "html-encoding-sniffer": "^4.0.0",
++        "http-proxy-agent": "^7.0.2",
++        "https-proxy-agent": "^7.0.6",
++        "is-potential-custom-element-name": "^1.0.1",
++        "nwsapi": "^2.2.16",
++        "parse5": "^7.2.1",
++        "rrweb-cssom": "^0.8.0",
++        "saxes": "^6.0.0",
++        "symbol-tree": "^3.2.4",
++        "tough-cookie": "^5.1.1",
++        "w3c-xmlserializer": "^5.0.0",
++        "webidl-conversions": "^7.0.0",
++        "whatwg-encoding": "^3.1.1",
++        "whatwg-mimetype": "^4.0.0",
++        "whatwg-url": "^14.1.1",
++        "ws": "^8.18.0",
++        "xml-name-validator": "^5.0.0"
++      },
++      "engines": {
++        "node": ">=18"
++      },
++      "peerDependencies": {
++        "canvas": "^3.0.0"
++      },
++      "peerDependenciesMeta": {
++        "canvas": {
++          "optional": true
++        }
++      }
++    },
++    "node_modules/jsdom/node_modules/tr46": {
++      "version": "5.1.1",
++      "resolved": "https://registry.npmjs.org/tr46/-/tr46-5.1.1.tgz",
++      "integrity": "sha512-hdF5ZgjTqgAntKkklYw0R03MG2x/bSzTtkxmIRw/sTNV8YXsCJ1tfLAX23lhxhHJlEf3CRCOCGGWw3vI3GaSPw==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "punycode": "^2.3.1"
++      },
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/jsdom/node_modules/webidl-conversions": {
++      "version": "7.0.0",
++      "resolved": "https://registry.npmjs.org/webidl-conversions/-/webidl-conversions-7.0.0.tgz",
++      "integrity": "sha512-VwddBukDzu71offAQR975unBIGqfKZpM+8ZX6ySk8nYhVoo5CYaZyzt3YBvYtRtO+aoGlqxPg/B87NGVZ/fu6g==",
++      "dev": true,
++      "license": "BSD-2-Clause",
++      "engines": {
++        "node": ">=12"
++      }
++    },
++    "node_modules/jsdom/node_modules/whatwg-url": {
++      "version": "14.2.0",
++      "resolved": "https://registry.npmjs.org/whatwg-url/-/whatwg-url-14.2.0.tgz",
++      "integrity": "sha512-De72GdQZzNTUBBChsXueQUnPKDkg/5A5zp7pFDuQAj5UFoENpiACU0wlCvzpAGnTkj++ihpKwKyYewn/XNUbKw==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "tr46": "^5.1.0",
++        "webidl-conversions": "^7.0.0"
++      },
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/lru-cache": {
++      "version": "10.4.3",
++      "resolved": "https://registry.npmjs.org/lru-cache/-/lru-cache-10.4.3.tgz",
++      "integrity": "sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ==",
++      "dev": true,
++      "license": "ISC"
++    },
++    "node_modules/ms": {
++      "version": "2.1.3",
++      "resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
++      "integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==",
++      "dev": true,
++      "license": "MIT"
++    },
+     "node_modules/node-fetch": {
+       "version": "2.7.0",
+       "resolved": "https://registry.npmjs.org/node-fetch/-/node-fetch-2.7.0.tgz",
+@@ -324,6 +719,13 @@
+         }
+       }
+     },
++    "node_modules/nwsapi": {
++      "version": "2.2.28",
++      "resolved": "https://registry.npmjs.org/nwsapi/-/nwsapi-2.2.28.tgz",
++      "integrity": "sha512-IlVB7OS7qrOsVYlpnFIkETjMwT9jwvmocJmmM+GZU/PAB3uGi9Ezd7vcWhWBUnSc0ya4ppmQITOyP1ez9gg8cg==",
++      "dev": true,
++      "license": "MIT"
++    },
+     "node_modules/opencollective-postinstall": {
+       "version": "2.0.3",
+       "resolved": "https://registry.npmjs.org/opencollective-postinstall/-/opencollective-postinstall-2.0.3.tgz",
+@@ -334,6 +736,19 @@
+         "opencollective-postinstall": "index.js"
+       }
+     },
++    "node_modules/parse5": {
++      "version": "7.3.0",
++      "resolved": "https://registry.npmjs.org/parse5/-/parse5-7.3.0.tgz",
++      "integrity": "sha512-IInvU7fabl34qmi9gY8XOVxhYyMyuH2xUNpb2q8/Y+7552KlejkRvqvD19nMoUW/uQGGbqNpA6Tufu5FL5BZgw==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "entities": "^6.0.0"
++      },
++      "funding": {
++        "url": "https://github.com/inikulin/parse5?sponsor=1"
++      }
++    },
+     "node_modules/pdfjs-dist": {
+       "version": "6.3.289",
+       "resolved": "https://registry.npmjs.org/pdfjs-dist/-/pdfjs-dist-6.3.289.tgz",
+@@ -347,6 +762,16 @@
+         "@napi-rs/canvas": "^1.0.0"
+       }
+     },
++    "node_modules/punycode": {
++      "version": "2.3.1",
++      "resolved": "https://registry.npmjs.org/punycode/-/punycode-2.3.1.tgz",
++      "integrity": "sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=6"
++      }
++    },
+     "node_modules/regenerator-runtime": {
+       "version": "0.13.11",
+       "resolved": "https://registry.npmjs.org/regenerator-runtime/-/regenerator-runtime-0.13.11.tgz",
+@@ -354,6 +779,40 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/rrweb-cssom": {
++      "version": "0.8.0",
++      "resolved": "https://registry.npmjs.org/rrweb-cssom/-/rrweb-cssom-0.8.0.tgz",
++      "integrity": "sha512-guoltQEx+9aMf2gDZ0s62EcV8lsXR+0w8915TC3ITdn2YueuNjdAYh/levpU9nFaoChh9RUS5ZdQMrKfVEN9tw==",
++      "dev": true,
++      "license": "MIT"
++    },
++    "node_modules/safer-buffer": {
++      "version": "2.1.2",
++      "resolved": "https://registry.npmjs.org/safer-buffer/-/safer-buffer-2.1.2.tgz",
++      "integrity": "sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==",
++      "dev": true,
++      "license": "MIT"
++    },
++    "node_modules/saxes": {
++      "version": "6.0.0",
++      "resolved": "https://registry.npmjs.org/saxes/-/saxes-6.0.0.tgz",
++      "integrity": "sha512-xAg7SOnEhrm5zI3puOOKyy1OMcMlIJZYNJY7xLBwSze0UjhPLnWfj2GF2EpT0jmzaJKIWKHLsaSSajf35bcYnA==",
++      "dev": true,
++      "license": "ISC",
++      "dependencies": {
++        "xmlchars": "^2.2.0"
++      },
++      "engines": {
++        "node": ">=v12.22.7"
++      }
++    },
++    "node_modules/symbol-tree": {
++      "version": "3.2.4",
++      "resolved": "https://registry.npmjs.org/symbol-tree/-/symbol-tree-3.2.4.tgz",
++      "integrity": "sha512-9QNk5KwDF+Bvz+PyObkmSYjI5ksVUYtjW7AU22r2NKcfLJcXp96hkDWU3+XndOsUb+AQ9QhfzfCT2O+CNWT5Tw==",
++      "dev": true,
++      "license": "MIT"
++    },
+     "node_modules/tesseract.js": {
+       "version": "7.0.0",
+       "resolved": "https://registry.npmjs.org/tesseract.js/-/tesseract.js-7.0.0.tgz",
+@@ -380,6 +839,39 @@
+       "dev": true,
+       "license": "Apache-2.0"
+     },
++    "node_modules/tldts": {
++      "version": "6.1.86",
++      "resolved": "https://registry.npmjs.org/tldts/-/tldts-6.1.86.tgz",
++      "integrity": "sha512-WMi/OQ2axVTf/ykqCQgXiIct+mSQDFdH2fkwhPwgEwvJ1kSzZRiinb0zF2Xb8u4+OqPChmyI6MEu4EezNJz+FQ==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "tldts-core": "^6.1.86"
++      },
++      "bin": {
++        "tldts": "bin/cli.js"
++      }
++    },
++    "node_modules/tldts-core": {
++      "version": "6.1.86",
++      "resolved": "https://registry.npmjs.org/tldts-core/-/tldts-core-6.1.86.tgz",
++      "integrity": "sha512-Je6p7pkk+KMzMv2XXKmAE3McmolOQFdxkKw0R8EYNr7sELW46JqnNeTX8ybPiQgvg1ymCoF8LXs5fzFaZvJPTA==",
++      "dev": true,
++      "license": "MIT"
++    },
++    "node_modules/tough-cookie": {
++      "version": "5.1.2",
++      "resolved": "https://registry.npmjs.org/tough-cookie/-/tough-cookie-5.1.2.tgz",
++      "integrity": "sha512-FVDYdxtnj0G6Qm/DhNPSb8Ju59ULcup3tuJxkFb5K8Bv2pUXILbf0xZWU8PX8Ov19OXljbUyveOFwRMwkXzO+A==",
++      "dev": true,
++      "license": "BSD-3-Clause",
++      "dependencies": {
++        "tldts": "^6.1.32"
++      },
++      "engines": {
++        "node": ">=16"
++      }
++    },
+     "node_modules/tr46": {
+       "version": "0.0.3",
+       "resolved": "https://registry.npmjs.org/tr46/-/tr46-0.0.3.tgz",
+@@ -387,6 +879,19 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/w3c-xmlserializer": {
++      "version": "5.0.0",
++      "resolved": "https://registry.npmjs.org/w3c-xmlserializer/-/w3c-xmlserializer-5.0.0.tgz",
++      "integrity": "sha512-o8qghlI8NZHU1lLPrpi2+Uq7abh4GGPpYANlalzWxyWteJOCsr/P+oPBA49TOLu5FTZO4d3F9MnWJfiMo4BkmA==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "xml-name-validator": "^5.0.0"
++      },
++      "engines": {
++        "node": ">=18"
++      }
++    },
+     "node_modules/wasm-feature-detect": {
+       "version": "1.9.0",
+       "resolved": "https://registry.npmjs.org/wasm-feature-detect/-/wasm-feature-detect-1.9.0.tgz",
+@@ -401,6 +906,30 @@
+       "dev": true,
+       "license": "BSD-2-Clause"
+     },
++    "node_modules/whatwg-encoding": {
++      "version": "3.1.1",
++      "resolved": "https://registry.npmjs.org/whatwg-encoding/-/whatwg-encoding-3.1.1.tgz",
++      "integrity": "sha512-6qN4hJdMwfYBtE3YBTTHhoeuUrDBPZmbQaxWAqSALV/MeEnR5z1xd8UKud2RAkFoPkmB+hli1TZSnyi84xz1vQ==",
++      "deprecated": "Use @exodus/bytes instead for a more spec-conformant and faster implementation",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "iconv-lite": "0.6.3"
++      },
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/whatwg-mimetype": {
++      "version": "4.0.0",
++      "resolved": "https://registry.npmjs.org/whatwg-mimetype/-/whatwg-mimetype-4.0.0.tgz",
++      "integrity": "sha512-QaKxh0eNIi2mE9p2vEdzfagOKHCcj1pJ56EEHGQOVxp8r9/iszLUUV7v89x9O1p/T+NlTM5W7jW6+cz4Fq1YVg==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=18"
++      }
++    },
+     "node_modules/whatwg-url": {
+       "version": "5.0.0",
+       "resolved": "https://registry.npmjs.org/whatwg-url/-/whatwg-url-5.0.0.tgz",
+@@ -412,6 +941,45 @@
+         "webidl-conversions": "^3.0.0"
+       }
+     },
++    "node_modules/ws": {
++      "version": "8.21.3",
++      "resolved": "https://registry.npmjs.org/ws/-/ws-8.21.3.tgz",
++      "integrity": "sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw==",
++      "dev": true,
++      "license": "MIT",
++      "engines": {
++        "node": ">=10.0.0"
++      },
++      "peerDependencies": {
++        "bufferutil": "^4.0.1",
++        "utf-8-validate": ">=5.0.2"
++      },
++      "peerDependenciesMeta": {
++        "bufferutil": {
++          "optional": true
++        },
++        "utf-8-validate": {
++          "optional": true
++        }
++      }
++    },
++    "node_modules/xml-name-validator": {
++      "version": "5.0.0",
++      "resolved": "https://registry.npmjs.org/xml-name-validator/-/xml-name-validator-5.0.0.tgz",
++      "integrity": "sha512-EvGK8EJ3DhaHfbRlETOWAS5pO9MZITeauHKJyb8wyajUfQUenkIg2MvLDTZ4T/TgIcm3HU0TFBgWWboAZ30UHg==",
++      "dev": true,
++      "license": "Apache-2.0",
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/xmlchars": {
++      "version": "2.2.0",
++      "resolved": "https://registry.npmjs.org/xmlchars/-/xmlchars-2.2.0.tgz",
++      "integrity": "sha512-JZnDKK8B0RCDw84FNdDAIpZK+JuJw+s7Lz8nksI7SIuU3UXJJslUthsi+uWBUYOwPFwW7W7PRLRfUKpxjtjFCw==",
++      "dev": true,
++      "license": "MIT"
++    },
+     "node_modules/zlibjs": {
+       "version": "0.3.1",
+       "resolved": "https://registry.npmjs.org/zlibjs/-/zlibjs-0.3.1.tgz",
+diff --git a/package.json b/package.json
+index 3130442..ed191b2 100644
+--- a/package.json
++++ b/package.json
+@@ -4,7 +4,7 @@
+   "private": true,
+   "description": "Local-first Chrome side-panel prototype for Nava's form-completion protocol.",
+   "scripts": {
+-    "check": "node --check background.js && node --check shared/form-engine.js && node --check shared/agentic-planner.js && node --check shared/connector-engine.js && node --check shared/work-queue-engine.js && node --check shared/program-catalog.js && node --check shared/site-adapters.js && node --check content/form-agent.js && node --check sidepanel/ocr-engine.js && node --check sidepanel/document-parser.js && node --check sidepanel/sidepanel.js && node --check demo/extensive-application.js && node --check connector-service/mock-server.mjs && node --check model-bridge/core.mjs && node --check model-bridge/server.mjs && node --check scripts/smoke-subscription-planner.mjs && node --check scripts/vendor-ocr-assets.mjs && node --check scripts/generate-ocr-fixtures.mjs && node --check scripts/run-extraction-eval.mjs && node -e \"JSON.parse(require('node:fs').readFileSync('manifest.json','utf8'))\"",
++    "check": "node --check background.js && node --check shared/form-engine.js && node --check shared/agentic-planner.js && node --check shared/connector-engine.js && node --check shared/work-queue-engine.js && node --check shared/program-catalog.js && node --check shared/repair-observe.js && node --check shared/site-adapters.js && node --check content/form-agent.js && node --check sidepanel/ocr-engine.js && node --check sidepanel/document-parser.js && node --check sidepanel/sidepanel.js && node --check demo/extensive-application.js && node --check connector-service/mock-server.mjs && node --check model-bridge/core.mjs && node --check model-bridge/server.mjs && node --check scripts/smoke-subscription-planner.mjs && node --check scripts/vendor-ocr-assets.mjs && node --check scripts/generate-ocr-fixtures.mjs && node --check scripts/run-extraction-eval.mjs && node -e \"JSON.parse(require('node:fs').readFileSync('manifest.json','utf8'))\"",
+     "connector:mock": "node connector-service/mock-server.mjs",
+     "model:bridge": "node model-bridge/server.mjs",
+     "model:smoke": "node scripts/smoke-subscription-planner.mjs",
+@@ -17,6 +17,7 @@
+     "@napi-rs/canvas": "^1.0.9",
+     "fflate": "^0.8.3",
+     "pdfjs-dist": "^6.3.289",
+-    "tesseract.js": "^7.0.0"
++    "tesseract.js": "^7.0.0",
++    "jsdom": "^26.1.0"
+   }
+ }
+diff --git a/shared/repair-observe.js b/shared/repair-observe.js
+new file mode 100644
+index 0000000..924c7f0
+--- /dev/null
++++ b/shared/repair-observe.js
+@@ -0,0 +1,497 @@
++(function installRepairObserve(root) {
++  'use strict';
++
++  /**
++   * Reads the open page for a deterministic playbook repair.
++   *
++   * An observation is a selector, an accessible label, an input type, and how
++   * many elements that selector matches. It is not a field map. This module
++   * does not decide which old field moved where. The API does that, and only
++   * when the caseworker sends this description. Values, placeholders, and
++   * typed input are not read.
++   *
++   * Program slug: the caseworker already chooses a program in the side panel.
++   * Those ids are the API slugs. A BenefitsCal application can include
++   * CalFresh, Medi-Cal, and CalWORKs together; the repair call takes one slug,
++   * so the first selected id is sent and the API looks up the playbook that
++   * includes it. An empty selection is not guessed from the page address.
++   */
++
++  const MAX_OBSERVED = 80;
++  const MAX_COUNT = 50;
++  const MAX_SELECTOR = 500;
++  const MAX_LABEL = 240;
++  const MAX_QUESTION = 240;
++  const MAX_TYPE = 40;
++  const FALLBACK_PROGRAMS = ['calfresh', 'medical', 'wic', 'calworks', 'ihss'];
++  const STOP = new Set([
++    'the', 'and', 'for', 'with', 'your', 'you', 'what', 'this', 'that', 'from',
++    'please', 'date', 'code', 'number',
++  ]);
++  const ALIASES = {
++    postalCode: 'zip postal',
++    dateOfBirth: 'birth dob birthday',
++    ssn: 'ssn social security',
++    ein: 'ein employer',
++    phone: 'phone telephone mobile',
++    email: 'email',
++    primaryLanguage: 'language',
++    fullName: 'full',
++    firstName: 'first',
++    lastName: 'last',
++    addressLine1: 'street',
++    income: 'income wages',
++    childcare: 'childcare daycare',
++    unemployment: 'unemployment',
++    preferredContact: 'contact',
++  };
++  const FALLBACK_LABELS = {
++    ssn: 'Social Security Number',
++    ein: 'Employer Identification Number',
++    dateOfBirth: 'Date of birth',
++    phone: 'Phone',
++    email: 'Email',
++    postalCode: 'ZIP code',
++    fullName: 'Full name',
++    firstName: 'First name',
++    lastName: 'Last name',
++  };
++
++  function cleanText(value) {
++    return String(value || '').replace(/\s+/g, ' ').trim();
++  }
++
++  function knownProgramIds() {
++    const programs = root.NavaProgramCatalog?.PROGRAMS;
++    if (Array.isArray(programs) && programs.length) {
++      return programs.map((program) => program.id).filter(Boolean);
++    }
++    return FALLBACK_PROGRAMS;
++  }
++
++  function repairProgramSlug(programIds) {
++    const known = new Set(knownProgramIds());
++    const selected = [];
++    (Array.isArray(programIds) ? programIds : []).forEach((id) => {
++      const slug = String(id || '').trim();
++      if (!slug || !known.has(slug) || selected.includes(slug)) return;
++      selected.push(slug);
++    });
++    return selected[0] || null;
++  }
++
++  function cssEscape(document, value) {
++    const escape = document?.defaultView?.CSS?.escape || root.CSS?.escape;
++    if (typeof escape === 'function') return escape(String(value));
++    return String(value).replace(/[^a-zA-Z0-9_-]/g, (character) => `\\${character}`);
++  }
++
++  function attrEscape(value) {
++    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
++  }
++
++  function ephemeralId(id) {
++    if (!id || id.length > 80) return true;
++    if (/^[0-9]+$/.test(id) || /\s/.test(id)) return true;
++    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) return true;
++    if (/^(?:ember\d|react-|vue-|ng-|ext-gen|:r\d)/i.test(id)) return true;
++    if (id.includes(':')) return true;
++    return false;
++  }
++
++  function isCollectable(element) {
++    const tag = element?.tagName;
++    if (tag !== 'INPUT' && tag !== 'SELECT' && tag !== 'TEXTAREA') return false;
++    if (tag !== 'INPUT') return true;
++    const type = cleanText(element.getAttribute('type') || 'text').toLowerCase();
++    return !['hidden', 'submit', 'button', 'reset', 'image', 'file'].includes(type);
++  }
++
++  function directText(element) {
++    let text = '';
++    element.childNodes.forEach((node) => {
++      if (node.nodeType === 3) {
++        text += ` ${node.nodeValue || ''}`;
++        return;
++      }
++      if (node.nodeType !== 1) return;
++      const tag = node.tagName;
++      if (['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON', 'SCRIPT', 'STYLE'].includes(tag)) return;
++      text += ` ${directText(node)}`;
++    });
++    return cleanText(text);
++  }
++
++  function accessibleLabel(element) {
++    const document = element.ownerDocument;
++    const id = element.getAttribute('id');
++    if (id && document?.querySelectorAll) {
++      const labels = [...document.querySelectorAll('label')].filter((label) => label.getAttribute('for') === id);
++      const text = cleanText(labels.map((label) => directText(label)).join(' '));
++      if (text) return text.slice(0, MAX_LABEL);
++    }
++    const wrapped = element.closest?.('label');
++    if (wrapped) {
++      const text = directText(wrapped);
++      if (text) return text.slice(0, MAX_LABEL);
++    }
++    const aria = cleanText(element.getAttribute('aria-label'));
++    if (aria) return aria.slice(0, MAX_LABEL);
++    const labelledBy = cleanText(element.getAttribute('aria-labelledby'));
++    if (labelledBy && document?.getElementById) {
++      const text = cleanText(labelledBy.split(/\s+/).map((ref) => {
++        const node = document.getElementById(ref);
++        if (!node || node === element) return '';
++        if (['INPUT', 'SELECT', 'TEXTAREA'].includes(node.tagName)) return '';
++        return directText(node);
++      }).join(' '));
++      if (text) return text.slice(0, MAX_LABEL);
++    }
++    return '';
++  }
++
++  function questionFor(element, label) {
++    const group = element.closest?.('fieldset');
++    const legend = group?.querySelector?.('legend');
++    const text = legend ? directText(legend) : '';
++    if (!text || text === label) return '';
++    return text.slice(0, MAX_QUESTION);
++  }
++
++  function controlType(element) {
++    if (element.tagName === 'SELECT') return 'select';
++    if (element.tagName === 'TEXTAREA') return 'textarea';
++    return cleanText(element.getAttribute('type') || 'text').toLowerCase().slice(0, MAX_TYPE) || 'text';
++  }
++
++  function isRequired(element) {
++    return element.hasAttribute('required') || element.getAttribute('aria-required') === 'true';
++  }
++
++  function structuralSelector(element) {
++    const document = element.ownerDocument;
++    const parts = [];
++    let node = element;
++    while (node && node.nodeType === 1 && node !== document.documentElement) {
++      const id = node.getAttribute('id');
++      if (node !== element && id && !ephemeralId(id)) {
++        parts.unshift(`#${cssEscape(document, id)}`);
++        break;
++      }
++      let part = node.tagName.toLowerCase();
++      const parent = node.parentElement;
++      if (!parent) {
++        parts.unshift(part);
++        break;
++      }
++      const same = [...parent.children].filter((child) => child.tagName === node.tagName);
++      if (same.length > 1) part += `:nth-of-type(${same.indexOf(node) + 1})`;
++      parts.unshift(part);
++      node = parent;
++    }
++    return parts.join(' > ');
++  }
++
++  function selectorFor(element) {
++    const document = element.ownerDocument;
++    const id = element.getAttribute('id');
++    if (id && !ephemeralId(id)) return `#${cssEscape(document, id)}`;
++    const name = element.getAttribute('name');
++    if (name) {
++      const tag = element.tagName.toLowerCase();
++      return `${tag}[name="${attrEscape(name)}"]:not([type="hidden"])`;
++    }
++    return structuralSelector(element);
++  }
++
++  function matchCount(document, selector) {
++    try {
++      return document.querySelectorAll(selector).length;
++    } catch {
++      return -1;
++    }
++  }
++
++  function unanimous(values) {
++    if (!values.length) return null;
++    const first = values[0];
++    return values.every((value) => value === first) ? first : null;
++  }
++
++  function refusal(message) {
++    return { observed: [], refused: message };
++  }
++
++  function collectObservations(document) {
++    if (!document?.querySelectorAll) {
++      return refusal('This page could not be described for a repair. Nothing was sent.');
++    }
++    const elements = [...document.querySelectorAll('input, select, textarea')].filter(isCollectable);
++    const groups = new Map();
++    for (const element of elements) {
++      const selector = selectorFor(element);
++      if (!selector || selector.length > MAX_SELECTOR) {
++        return refusal('A control on this page did not have a selector short enough to send. Nothing was sent.');
++      }
++      const label = accessibleLabel(element);
++      const question = questionFor(element, label);
++      const described = {
++        selector,
++        label,
++        question,
++        type: controlType(element),
++        required: isRequired(element),
++      };
++      const existing = groups.get(selector);
++      if (existing) existing.members.push(described);
++      else groups.set(selector, { selector, members: [described] });
++    }
++
++    if (groups.size > MAX_OBSERVED) {
++      return refusal(`This page has more than ${MAX_OBSERVED} controls. Sending part of the page would be a guess, so nothing was sent.`);
++    }
++
++    const observed = [];
++    for (const group of groups.values()) {
++      const count = matchCount(document, group.selector);
++      if (count < 1) {
++        return refusal('A control on this page did not have a usable selector. Nothing was sent.');
++      }
++      if (count > MAX_COUNT) {
++        return refusal(`A selector on this page matches more than ${MAX_COUNT} controls. Nothing was sent.`);
++      }
++      const type = unanimous(group.members.map((member) => member.type));
++      if (!type) {
++        return refusal('A selector on this page matches controls of different types. Nothing was sent.');
++      }
++      const label = unanimous(group.members.map((member) => member.label));
++      const question = unanimous(group.members.map((member) => member.question));
++      const item = {
++        selector: group.selector,
++        label: label || '',
++        type,
++        count,
++      };
++      if (question) item.question = question;
++      if (group.members.every((member) => member.required)) item.required = true;
++      observed.push(item);
++    }
++    return { observed, refused: null };
++  }
++
++  function sanitizeControl(control) {
++    const selector = cleanText(control?.selector);
++    const label = String(control?.label || '');
++    const type = cleanText(control?.type).toLowerCase();
++    const count = Number(control?.count);
++    if (!selector || selector.length > MAX_SELECTOR) {
++      throw new Error('A repair observation needs a selector. Nothing was sent.');
++    }
++    if (label.length > MAX_LABEL) throw new Error('A repair label is too long. Nothing was sent.');
++    if (!type || type.length > MAX_TYPE) throw new Error('A repair observation needs a type. Nothing was sent.');
++    if (!Number.isInteger(count) || count < 0 || count > MAX_COUNT) {
++      throw new Error('A repair observation needs a count. Nothing was sent.');
++    }
++    const item = { selector, label, type, count };
++    const question = cleanText(control?.question);
++    if (question) item.question = question.slice(0, MAX_QUESTION);
++    if (control?.required === true) item.required = true;
++    return item;
++  }
++
++  function buildRepairRequest(observed, publish) {
++    const body = {
++      observed: (Array.isArray(observed) ? observed : []).map(sanitizeControl),
++      publish: publish === true,
++    };
++    if (/"value"\s*:/.test(JSON.stringify(body))) {
++      throw new Error('A repair observation cannot include a value. Nothing was sent.');
++    }
++    return body;
++  }
++
++  function readRepairProposal(proposal) {
++    if (!proposal || typeof proposal !== 'object') return null;
++    const placement = (item) => ({
++      purpose: typeof item?.purpose === 'string' ? item.purpose : null,
++      fromSelector: String(item?.fromSelector || ''),
++      toSelector: typeof item?.toSelector === 'string' ? item.toSelector : null,
++      disposition: String(item?.disposition || ''),
++      reason: String(item?.reason || ''),
++    });
++    const list = (value) => (Array.isArray(value) ? value : []);
++    return {
++      publishable: proposal.publishable === true,
++      refused: typeof proposal.refused === 'string' ? proposal.refused : null,
++      kept: list(proposal.kept).map(placement),
++      moved: list(proposal.moved).map(placement),
++      unresolved: list(proposal.unresolved).map(placement),
++      unmapped: list(proposal.unmapped).map((item) => ({
++        selector: String(item?.selector || ''),
++        label: String(item?.label || ''),
++        reason: String(item?.reason || ''),
++      })),
++      probes: list(proposal.probes).map((item) => String(item || '')).filter(Boolean),
++    };
++  }
++
++  function purposeLabel(purpose, labels) {
++    if (!purpose) return 'This field';
++    if (labels && typeof labels[purpose] === 'string' && labels[purpose]) return labels[purpose];
++    if (FALLBACK_LABELS[purpose]) return FALLBACK_LABELS[purpose];
++    const spaced = String(purpose).replace(/([a-z])([A-Z])/g, '$1 $2');
++    return spaced.charAt(0).toUpperCase() + spaced.slice(1);
++  }
++
++  function humanize(selector) {
++    const text = String(selector || '').replace(/^#/, '').replace(/[-_]+/g, ' ').trim();
++    if (!text) return 'This field';
++    return text.charAt(0).toUpperCase() + text.slice(1);
++  }
++
++  function words(value) {
++    return String(value || '')
++      .toLowerCase()
++      .split(/[^a-z0-9]+/)
++      .filter((word) => word.length >= 3 && !STOP.has(word));
++  }
++
++  function fieldWords(placement, labels) {
++    const purpose = placement.purpose;
++    const base = purpose
++      ? `${purposeLabel(purpose, labels)} ${purpose.replace(/([a-z])([A-Z])/g, '$1 $2')} ${ALIASES[purpose] || ''}`
++      : placement.fromSelector.replace(/[#._-]+/g, ' ');
++    return new Set(words(base));
++  }
++
++  function explainRefusal(placement, observed, labels) {
++    const name = placement.purpose ? purposeLabel(placement.purpose, labels) : humanize(placement.fromSelector);
++    const pageLabels = observed
++      .filter((control) => control.count === 1 && cleanText(control.label))
++      .map((control) => cleanText(control.label));
++    const counts = new Map();
++    pageLabels.forEach((label) => {
++      const key = label.toLowerCase();
++      counts.set(key, (counts.get(key) || 0) + 1);
++    });
++    const wanted = fieldWords(placement, labels);
++    const tieLabel = pageLabels.find((label) => {
++      if ((counts.get(label.toLowerCase()) || 0) < 2) return false;
++      return words(label).some((word) => wanted.has(word));
++    });
++    if (tieLabel) {
++      return {
++        kind: 'tie',
++        label: name,
++        sentence: `${name} did not move. More than one box is labeled “${tieLabel}”, so this repair will not guess which one.`,
++      };
++    }
++    const named = pageLabels.some((label) => words(label).some((word) => wanted.has(word)));
++    const signature = pageLabels.find((label) => /signature date/i.test(label));
++    if (!named && placement.purpose === 'dateOfBirth' && signature) {
++      return {
++        kind: 'protected',
++        label: name,
++        sentence: `${name} did not move onto “${signature}.” A signature date is not a date of birth.`,
++      };
++    }
++    if (!named && (placement.purpose === 'ssn' || placement.purpose === 'ein')) {
++      const decoy = pageLabels.find((label) => /case number|medi-cal number|record id/i.test(label));
++      if (decoy) {
++        return {
++          kind: 'protected',
++          label: name,
++          sentence: `${name} did not move onto “${decoy}.” That label does not name this protected field.`,
++        };
++      }
++    }
++    if (!named) {
++      return {
++        kind: 'missing',
++        label: name,
++        sentence: `${name} did not move. No label on this page names it.`,
++      };
++    }
++    return {
++      kind: 'other',
++      label: name,
++      sentence: `${name} did not move. No single label named it, so it was left alone rather than guessed.`,
++    };
++  }
++
++  function labelOf(placement, bySelector, labels) {
++    const selector = placement.toSelector || placement.fromSelector;
++    const control = bySelector.get(selector);
++    if (cleanText(control?.label)) return cleanText(control.label);
++    if (placement.purpose) return purposeLabel(placement.purpose, labels);
++    return humanize(placement.fromSelector);
++  }
++
++  function publishNote(proposal) {
++    if (!proposal.publishable) {
++      const count = proposal.unresolved.length;
++      const noun = count === 1 ? 'field' : 'fields';
++      return `This repair cannot be published. ${count} ${noun} would have been a guess. Nothing was saved. The shared playbook was left as it was, and the form was not sent.`;
++    }
++    const probes = proposal.probes.length
++      ? ` The next freshness check looks for ${proposal.probes.join(', ')}.`
++      : '';
++    return `This is a dry run. Nothing was saved. Publishing is a separate action. It writes a new version for your organization, leaves the shared playbook as it was, and does not send the form.${probes} A repaired map still has to read every entered value back off the page.`;
++  }
++
++  /**
++   * Turns an API proposal into sentences.
++   *
++   * The proposal is the decision. This function does not build a field map
++   * and does not choose a selector the service did not already return.
++   */
++  function presentRepair(proposal, observed, labels) {
++    const safe = proposal?.kept && proposal?.moved && proposal?.unresolved && proposal?.unmapped
++      ? proposal
++      : readRepairProposal(proposal);
++    if (!safe) throw new Error('The repair service returned an unexpected reply. Nothing was guessed from this page.');
++    const controls = Array.isArray(observed) ? observed : [];
++    const bySelector = new Map(controls.map((control) => [control.selector, control]));
++    return {
++      kept: safe.kept.map((placement) => ({
++        label: labelOf(placement, bySelector, labels),
++        selector: placement.toSelector || placement.fromSelector,
++        sentence: `This box is still at ${placement.fromSelector}. The old map can keep it.`,
++      })),
++      moved: safe.moved.flatMap((placement) => {
++        if (!placement.toSelector) return [];
++        return [{
++          label: labelOf(placement, bySelector, labels),
++          from: placement.fromSelector,
++          to: placement.toSelector,
++          sentence: String(placement.reason || '').replaceAll('control', 'box'),
++        }];
++      }),
++      refused: safe.unresolved.map((placement) => explainRefusal(placement, controls, labels)),
++      unmapped: safe.unmapped.map((control) => {
++        if (!cleanText(control.label)) {
++          return {
++            label: 'No label',
++            sentence: `A box at ${control.selector} has no label. It was left off the map.`,
++          };
++        }
++        return {
++          label: cleanText(control.label),
++          sentence: `${cleanText(control.label)} (${control.selector}) is on the page and was not added to the map.`,
++        };
++      }),
++      publishable: safe.publishable === true,
++      publishNote: publishNote(safe),
++    };
++  }
++
++  const api = {
++    buildRepairRequest,
++    collectObservations,
++    presentRepair,
++    readRepairProposal,
++    repairProgramSlug,
++  };
++  root.NavaRepairObserve = api;
++  if (typeof module !== 'undefined' && module.exports) module.exports = api;
++})(typeof globalThis !== 'undefined' ? globalThis : this);
+diff --git a/sidepanel/index.html b/sidepanel/index.html
+index 299fa74..d731632 100644
+--- a/sidepanel/index.html
++++ b/sidepanel/index.html
+@@ -32,6 +32,7 @@
+     <script src="../shared/connector-engine.js?v=0.8.0"></script>
+     <script src="../shared/work-queue-engine.js?v=0.8.0"></script>
+     <script src="../shared/program-catalog.js?v=0.8.0"></script>
++    <script src="../shared/repair-observe.js?v=0.10.0"></script>
+     <script src="../vendor/fflate.min.js?v=0.8.0"></script>
+     <script src="ocr-engine.js?v=0.8.0"></script>
+     <script src="document-parser.js?v=0.8.0"></script>
+diff --git a/sidepanel/sidepanel.js b/sidepanel/sidepanel.js
+index 9324b12..bd0c470 100644
+--- a/sidepanel/sidepanel.js
++++ b/sidepanel/sidepanel.js
+@@ -7,6 +7,7 @@
+   const connectorEngine = globalThis.NavaConnectorEngine;
+   const workQueueEngine = globalThis.NavaWorkQueueEngine;
+   const programCatalog = globalThis.NavaProgramCatalog;
++  const repairObserve = globalThis.NavaRepairObserve;
+   const previewMode = new URLSearchParams(location.search).get('preview') === '1'
+     || !globalThis.chrome?.runtime?.id;
+   const demoMode = new URLSearchParams(location.search).get('demo') === '1';
+@@ -35,13 +36,14 @@
+     agentRuntime: { status: previewMode ? 'preview' : 'checking', message: '' },
+     plannerBase: '',
+     agentProvider: { kind: 'chrome-local' },
++    repair: null,
+   };
+ 
+   const MAX_AUTOMATED_PAGES = 60;
+   const DEFAULT_AUTOMATED_PAGES = 12;
+   const MAX_SAME_PAGE_FILL_PASSES = 3;
+   const MAX_PARALLEL_APPLICATIONS = 3;
+-  const PAGE_AGENT_VERSION = 5;
++  const PAGE_AGENT_VERSION = 6;
+   const TAB_READY_TIMEOUT_MS = 60_000;
+   const NAVIGATION_TIMEOUT_MS = 60_000;
+   const APPLICATION_LEASE_MS = 2 * 60 * 1000;
+@@ -388,7 +390,7 @@
+     try {
+       await chrome.scripting.executeScript({
+         target: documentId ? { tabId: tab.id, documentIds: [documentId] } : { tabId: tab.id },
+-        files: ['shared/form-engine.js', 'shared/site-adapters.js', 'content/form-agent.js'],
++        files: ['shared/form-engine.js', 'shared/site-adapters.js', 'shared/repair-observe.js', 'content/form-agent.js'],
+       });
+       const verified = await chrome.tabs.sendMessage(tab.id, { type: 'NAVA_PING' }, messageOptions);
+       if (verified?.ok && verified.agentVersion === PAGE_AGENT_VERSION && verified.adaptersReady) return;
+@@ -1761,6 +1763,9 @@
+       actions += `<button class="small-button secondary" type="button" data-action="open-handoff" data-app="${encoded(application.id)}">Pause or hand off</button>`;
+     }
+     if (application.tabId) actions += `<button class="small-button secondary" type="button" data-action="go-tab" data-app="${encoded(application.id)}">Go to application</button>`;
++    if (!running && !application.programSelectionRequired) {
++      actions += `<button class="small-button secondary" type="button" data-action="repair-page" data-app="${encoded(application.id)}">Dry-run a playbook repair</button>`;
++    }
+ 
+     return `
+       <article class="application-card ${attention ? 'attention' : ''} ${review ? 'review' : ''}">
+@@ -1983,6 +1988,67 @@
+       </section>`;
+   }
+ 
++  function renderRepairLines(lines, empty) {
++    if (!lines.length) return `<p class="card-note">${escapeHtml(empty)}</p>`;
++    return `<div class="repair-list">${lines.map((line) => `
++      <div class="repair-line">
++        <strong>${escapeHtml(line.label)}</strong>
++        ${line.from ? `<div class="repair-selector">${escapeHtml(line.from)} → ${escapeHtml(line.to)}</div>` : ''}
++        ${line.selector && !line.from ? `<div class="repair-selector">${escapeHtml(line.selector)}</div>` : ''}
++        <p class="card-note">${escapeHtml(line.sentence)}</p>
++      </div>`).join('')}</div>`;
++  }
++
++  function renderRepair() {
++    const current = state.repair;
++    if (!current) {
++      state.view = 'dashboard';
++      return renderDashboard();
++    }
++    const presented = current.presented;
++    const benefits = ['calfresh', 'medical', 'calworks'];
++    const selectedBenefits = (current.programIds || []).filter((id) => benefits.includes(id));
++    const benefitNote = selectedBenefits.length > 1
++      ? ` This BenefitsCal application includes more than one program. The dry run uses ${current.programName}, and the service looks up the playbook that includes it.`
++      : '';
++    const noticeClass = current.published
++      ? 'notice success'
++      : (current.problem || current.unreachable ? 'notice error' : 'notice');
++    const publishControls = !presented || !presented.publishable || current.published
++      ? ''
++      : current.confirming
++        ? `<p>Publish this repair for your organization? This writes a new version for your organization. The shared playbook stays as it was. The form is not sent.</p>
++          <div class="form-actions">
++            <button class="primary-button" type="button" data-action="repair-publish">Publish this repair</button>
++            <button class="secondary-button" type="button" data-action="repair-cancel-publish">Keep it as a dry run</button>
++          </div>`
++        : `<div class="form-actions"><button class="primary-button" type="button" data-action="repair-ask-publish">Publish this repair</button></div>`;
++    appRoot.innerHTML = `
++      <section>
++        <button class="back-button" type="button" data-action="back-dashboard"><span aria-hidden="true">←</span> Back</button>
++        <div class="intro">
++          <p class="eyebrow">${escapeHtml(current.programName)}</p>
++          <h1>${escapeHtml(current.programName)} form · repair</h1>
++          <p class="lede">This is the ${escapeHtml(current.programName)} page you already have open. The repair service compares selectors and labels with the saved playbook. This is a dry run. It does not send the form, and it does not read what was typed.${escapeHtml(benefitNote)}</p>
++        </div>
++        ${renderError()}
++        ${current.statusNote ? `<div class="${noticeClass}" role="status"><span aria-hidden="true">${current.published ? '✓' : 'i'}</span><span>${escapeHtml(current.statusNote)}</span></div>` : ''}
++        ${presented ? `
++          <p class="section-label">Still in the same place</p>
++          ${renderRepairLines(presented.kept, 'Nothing stayed on its old selector. The labels below are what the map followed.')}
++          <p class="section-label">Moved</p>
++          ${renderRepairLines(presented.moved, 'No field moved.')}
++          <p class="section-label">Not repaired</p>
++          ${renderRepairLines(presented.refused, 'Nothing was refused. Every old field landed on one box.')}
++          <p class="section-label">Left off the map</p>
++          ${renderRepairLines(presented.unmapped, 'Every labeled box on the page is already in the map.')}
++          <p class="section-label">Publishing</p>
++          <p>${escapeHtml(presented.publishNote)}</p>
++          ${publishControls}
++        ` : ''}
++      </section>`;
++  }
++
+   function render() {
+     const renderView = {
+       connector: renderConnectorSetup,
+@@ -1998,6 +2064,7 @@
+       handoff: renderHandoff,
+       questions: renderQuestions,
+       review: renderReview,
++      repair: renderRepair,
+     }[state.view] || renderChoice;
+     renderView();
+     const resetScroll = () => {
+@@ -3122,10 +3189,187 @@
+     setTimeout(() => URL.revokeObjectURL(url), 1000);
+   }
+ 
++  async function postRepair(gateway, slug, body) {
++    const base = String(gateway.endpoint || '').replace(/\/v1\/plan$/, '');
++    let response;
++    try {
++      response = await fetch(`${base}/v1/programs/${encodeURIComponent(slug)}/playbook/repair`, {
++        method: 'POST',
++        headers: {
++          authorization: `Bearer ${gateway.token}`,
++          'content-type': 'application/json',
++        },
++        body: JSON.stringify(body),
++      });
++    } catch {
++      const error = new Error('The repair service could not be reached. Nothing was guessed from this page.');
++      error.unreachable = true;
++      throw error;
++    }
++    const payload = await response.json().catch(() => null);
++    if (!payload) {
++      const error = new Error('The repair service could not be reached. Nothing was guessed from this page.');
++      error.unreachable = true;
++      throw error;
++    }
++    if (!response.ok || payload.ok === false) {
++      const message = typeof payload.error === 'string' && payload.error.length <= 400
++        ? payload.error
++        : `The repair service returned ${response.status}. Nothing was guessed from this page.`;
++      const error = new Error(message);
++      throw error;
++    }
++    const proposal = repairObserve.readRepairProposal(payload.proposal);
++    if (!proposal) {
++      throw new Error('The repair service returned an unexpected reply. Nothing was guessed from this page.');
++    }
++    return { proposal, alreadyCurrent: payload.alreadyCurrent === true };
++  }
++
++  async function dryRunRepair(application, uiToken) {
++    if (previewMode) {
++      throw new Error('Install the extension and open the form to dry-run a repair. Nothing was guessed from this page.');
++    }
++    if (!repairObserve?.collectObservations || !repairObserve.buildRepairRequest) {
++      throw new Error('The repair tools did not load. Reload the extension. Nothing was guessed from this page.');
++    }
++    const slug = repairObserve.repairProgramSlug(application.programIds);
++    if (!slug) throw new Error('Choose a program before checking this page. Nothing was guessed from the form.');
++    const gateway = await agentPlanner.gatewayConfig();
++    if (!gateway?.endpoint || !gateway.token) {
++      throw new Error('Save the shared planner API address and a tenant key first. Nothing was guessed from the form.');
++    }
++    if (!application.tabId) {
++      throw new Error('Open this application first. The repair reads the page you already have open, and nothing was guessed.');
++    }
++    setBusy('Reading the open page. Typed values stay on the page.');
++    const tab = await chrome.tabs.get(application.tabId);
++    assertUiGeneration(uiToken);
++    const response = await sendToTab(tab, { type: 'NAVA_OBSERVE_REPAIR' }, { application });
++    assertUiGeneration(uiToken);
++    if (!response?.ok || !Array.isArray(response.observed)) {
++      throw new Error(response?.error || 'The open page did not return a repair observation. Nothing was guessed.');
++    }
++    const body = repairObserve.buildRepairRequest(response.observed, false);
++    const programName = programCatalog.programDefinition(slug)?.name || slug;
++    state.repair = {
++      applicationId: application.id,
++      slug,
++      programName,
++      programIds: Array.isArray(application.programIds) ? [...application.programIds] : [],
++      observed: body.observed,
++      proposal: null,
++      presented: null,
++      unreachable: false,
++      problem: false,
++      confirming: false,
++      publishing: false,
++      published: false,
++      alreadyCurrent: false,
++      statusNote: '',
++    };
++    state.view = 'repair';
++    setBusy('Asking the repair service for a dry run. Nothing is published.');
++    try {
++      const result = await postRepair(gateway, slug, body);
++      assertUiGeneration(uiToken);
++      const current = state.repair;
++      if (!current || current.applicationId !== application.id) return;
++      current.proposal = result.proposal;
++      current.presented = repairObserve.presentRepair(result.proposal, current.observed, engine.LABELS);
++      current.problem = false;
++      current.unreachable = false;
++      current.statusNote = 'This is a dry run. Nothing was saved, and the form was not sent.';
++    } catch (error) {
++      assertUiGeneration(uiToken);
++      const current = state.repair;
++      if (!current || current.applicationId !== application.id) throw error;
++      current.unreachable = error.unreachable === true;
++      current.problem = true;
++      current.presented = null;
++      current.statusNote = error.unreachable
++        ? 'The repair service could not be reached. Nothing was guessed from this page.'
++        : (error.message || 'The repair service could not be reached. Nothing was guessed from this page.');
++    }
++  }
++
++  async function publishObservedRepair(uiToken) {
++    const current = state.repair;
++    if (!current?.confirming || !current.presented?.publishable) {
++      throw new Error('Review a dry run that can be published before saving it.');
++    }
++    if (current.publishing || current.published) return;
++    if (!repairObserve?.buildRepairRequest) {
++      throw new Error('The repair tools did not load. Nothing was published.');
++    }
++    const gateway = await agentPlanner.gatewayConfig();
++    if (!gateway?.endpoint || !gateway.token) {
++      throw new Error('Save the shared planner API address and a tenant key first. Nothing was published.');
++    }
++    current.publishing = true;
++    try {
++      const body = repairObserve.buildRepairRequest(current.observed, true);
++      setBusy('Publishing this repair for your organization. The form is not sent.');
++      const result = await postRepair(gateway, current.slug, body);
++      assertUiGeneration(uiToken);
++      if (state.repair !== current) return;
++      current.proposal = result.proposal;
++      current.presented = repairObserve.presentRepair(result.proposal, current.observed, engine.LABELS);
++      current.confirming = false;
++      current.published = true;
++      current.alreadyCurrent = result.alreadyCurrent;
++      current.unreachable = false;
++      current.problem = false;
++      current.statusNote = result.alreadyCurrent
++        ? 'This repair was already the current version for your organization. Nothing new was written. The shared playbook was left as it was. The form was not sent.'
++        : 'Saved a new version for your organization. The shared playbook was left as it was. The form was not sent.';
++      state.view = 'repair';
++    } catch (error) {
++      if (state.repair === current) {
++        current.publishing = false;
++        current.confirming = false;
++        current.problem = true;
++        current.unreachable = error.unreachable === true;
++        current.statusNote = error.unreachable
++          ? 'The repair service could not be reached, so nothing was published. Nothing was guessed from this page.'
++          : (error.message || 'The repair service could not be reached, so nothing was published.');
++        state.view = 'repair';
++      }
++    } finally {
++      if (state.repair === current) current.publishing = false;
++    }
++  }
++
+   async function onClick(button, initialUiGeneration = uiGeneration) {
+     const action = button.dataset.action;
+     let uiToken = initialUiGeneration;
+     state.error = '';
++    if (action === 'repair-page') {
++      const application = state.apps.find((item) => item.id === decoded(button.dataset.app));
++      if (!application) throw new Error('That application is no longer available.');
++      state.currentAppId = application.id;
++      await dryRunRepair(application, uiToken);
++      assertUiGeneration(uiToken);
++      render();
++      return;
++    }
++    if (action === 'repair-ask-publish') {
++      if (!state.repair?.presented?.publishable || state.repair.published) return;
++      state.repair.confirming = true;
++      render();
++      return;
++    }
++    if (action === 'repair-cancel-publish') {
++      if (state.repair) state.repair.confirming = false;
++      render();
++      return;
++    }
++    if (action === 'repair-publish') {
++      await publishObservedRepair(uiToken);
++      assertUiGeneration(uiToken);
++      render();
++      return;
++    }
+     if (action === 'save-planner') {
+       const baseInput = document.getElementById('nava-api-base');
+       const tokenInput = document.getElementById('nava-api-token');
+diff --git a/sidepanel/styles.css b/sidepanel/styles.css
+index 16953d9..c1b59a1 100644
+--- a/sidepanel/styles.css
++++ b/sidepanel/styles.css
+@@ -1363,6 +1363,26 @@ button.connector-status:hover {
+   }
+ }
+ 
++.repair-list {
++  display: grid;
++  gap: 8px;
++}
++
++.repair-line {
++  display: grid;
++  gap: 4px;
++  padding: 12px;
++  border: 1px solid var(--soft-line);
++  border-radius: 8px;
++  background: var(--canvas);
++}
++
++.repair-selector {
++  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
++  font-size: 12px;
++  line-height: 1.4;
++}
++
+ @media (prefers-reduced-motion: reduce) {
+   *,
+   *::before,
+diff --git a/tests/fixtures/repair-observation.html b/tests/fixtures/repair-observation.html
+new file mode 100644
+index 0000000..fe06cb8
+--- /dev/null
++++ b/tests/fixtures/repair-observation.html
+@@ -0,0 +1,45 @@
++<!doctype html>
++<html lang="en">
++  <body>
++    <form id="application">
++      <label for="applicant-name">Name</label>
++      <input id="applicant-name" name="applicant-name" type="text" value="Jordan Sample" required>
++
++      <label for="ssn-a">Social Security Number</label>
++      <input id="ssn-a" type="text" value="123-45-6789">
++
++      <label for="ssn-b">Social Security Number</label>
++      <input id="ssn-b" type="password" value="987-65-4321">
++
++      <label>Phone <input name="phone" type="tel" value="951-555-1212"></label>
++      <label>Phone <input name="phone" type="tel" value="951-555-3434"></label>
++
++      <input id="nickname" type="text" placeholder="SAMPLE-PLACEHOLDER" value="Typed Nickname">
++
++      <label for="clinic">WIC clinic</label>
++      <select id="clinic">
++        <option value="secret-clinic-value">SECRET-OPTION</option>
++      </select>
++
++      <input type="hidden" name="token" value="hidden-secret-token">
++      <button type="submit">Submit application</button>
++
++      <label for=":r1:">Legal name</label>
++      <input id=":r1:" name="legal-name" type="text" value="Should Not Travel">
++
++      <label for="dup">ZIP code</label>
++      <input id="dup" type="text" value="92501">
++      <input id="dup" type="text" value="92502">
++
++      <fieldset>
++        <legend>Preferred contact method</legend>
++        <label for="contact-email">Email</label>
++        <input id="contact-email" type="radio" name="contact" value="email-secret">
++      </fieldset>
++
++      <div id="city-row">
++        <label>City <input type="text" value="WILDOMAR-TYPED"></label>
++      </div>
++    </form>
++  </body>
++</html>
+diff --git a/tests/repair-observe.test.cjs b/tests/repair-observe.test.cjs
+new file mode 100644
+index 0000000..6f5b507
+--- /dev/null
++++ b/tests/repair-observe.test.cjs
+@@ -0,0 +1,269 @@
++const test = require('node:test');
++const assert = require('node:assert/strict');
++const fs = require('node:fs');
++const path = require('node:path');
++const { JSDOM } = require('jsdom');
++
++require('../shared/program-catalog.js');
++const repair = require('../shared/repair-observe.js');
++
++const root = path.resolve(__dirname, '..');
++const fixturePath = path.join(__dirname, 'fixtures', 'repair-observation.html');
++const html = fs.readFileSync(fixturePath, 'utf8');
++const LABELS = {
++  ssn: 'Social Security Number',
++  dateOfBirth: 'Date of birth',
++  phone: 'Phone',
++  email: 'Email',
++};
++
++const SECRET_TEXT = [
++  'Jordan Sample',
++  '123-45-6789',
++  '987-65-4321',
++  '951-555-1212',
++  '951-555-3434',
++  'SAMPLE-PLACEHOLDER',
++  'Typed Nickname',
++  'secret-clinic-value',
++  'SECRET-OPTION',
++  'hidden-secret-token',
++  'Should Not Travel',
++  '92501',
++  '92502',
++  'email-secret',
++  'WILDOMAR-TYPED',
++];
++
++function documentFromFixture() {
++  const document = new JSDOM(html).window.document;
++  for (const element of document.querySelectorAll('input, select, textarea')) {
++    const original = element.getAttribute.bind(element);
++    element.getAttribute = (name) => {
++      const key = String(name || '').toLowerCase();
++      if (key === 'value' || key === 'placeholder') throw new Error(`read ${key}`);
++      return original(name);
++    };
++    Object.defineProperty(element, 'value', {
++      configurable: true,
++      get() {
++        throw new Error('read value');
++      },
++    });
++    Object.defineProperty(element, 'placeholder', {
++      configurable: true,
++      get() {
++        throw new Error('read placeholder');
++      },
++    });
++  }
++  return document;
++}
++
++test('the fixture is filled in, and the observation still has no values', () => {
++  for (const secret of SECRET_TEXT) assert.match(html, new RegExp(secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
++  const collected = repair.collectObservations(documentFromFixture());
++  assert.equal(collected.refused, null);
++  const body = repair.buildRepairRequest(collected.observed, false);
++  const serialized = JSON.stringify(body);
++  for (const secret of SECRET_TEXT) assert.equal(serialized.includes(secret), false, secret);
++  assert.equal(/"value"\s*:/.test(serialized), false);
++  assert.equal(body.publish, false);
++  assert.deepEqual(body.observed, [
++    { selector: '#applicant-name', label: 'Name', type: 'text', count: 1, required: true },
++    { selector: '#ssn-a', label: 'Social Security Number', type: 'text', count: 1 },
++    { selector: '#ssn-b', label: 'Social Security Number', type: 'password', count: 1 },
++    { selector: 'input[name="phone"]:not([type="hidden"])', label: 'Phone', type: 'tel', count: 2 },
++    { selector: '#nickname', label: '', type: 'text', count: 1 },
++    { selector: '#clinic', label: 'WIC clinic', type: 'select', count: 1 },
++    { selector: 'input[name="legal-name"]:not([type="hidden"])', label: 'Legal name', type: 'text', count: 1 },
++    { selector: '#dup', label: 'ZIP code', type: 'text', count: 2 },
++    {
++      selector: '#contact-email',
++      label: 'Email',
++      type: 'radio',
++      count: 1,
++      question: 'Preferred contact method',
++    },
++    { selector: '#city-row > label > input', label: 'City', type: 'text', count: 1 },
++  ]);
++  for (const control of body.observed) {
++    assert.deepEqual(Object.keys(control).filter((key) => !['selector', 'label', 'type', 'count', 'question', 'required'].includes(key)), []);
++  }
++});
++
++test('a duplicate label is reported and not turned into a local mapping', () => {
++  const collected = repair.collectObservations(documentFromFixture());
++  const labels = collected.observed.filter((control) => control.label === 'Social Security Number');
++  assert.deepEqual(labels.map((control) => control.selector), ['#ssn-a', '#ssn-b']);
++  assert.deepEqual(labels.map((control) => control.count), [1, 1]);
++  const phones = collected.observed.find((control) => control.label === 'Phone');
++  assert.equal(phones.count, 2);
++  assert.equal(repair.proposeRepair, undefined);
++  assert.equal(repair.fieldMap, undefined);
++  assert.equal(Object.hasOwn(collected, 'fieldMap'), false);
++  const body = repair.buildRepairRequest(collected.observed, false);
++  assert.equal(Object.hasOwn(body, 'fieldMap'), false);
++  assert.equal(body.publish, false);
++});
++
++test('a repair request drops a value and publishes only on an explicit boolean', () => {
++  const dryRun = repair.buildRepairRequest([
++    {
++      selector: '#applicant-name',
++      label: 'Name',
++      type: 'text',
++      count: 1,
++      value: 'Jordan Sample',
++      question: '',
++      required: false,
++      extra: true,
++    },
++  ], false);
++  assert.deepEqual(dryRun, {
++    observed: [{ selector: '#applicant-name', label: 'Name', type: 'text', count: 1 }],
++    publish: false,
++  });
++  assert.equal(JSON.stringify(dryRun).includes('Jordan'), false);
++  assert.equal(repair.buildRepairRequest(dryRun.observed, 'true').publish, false);
++  assert.equal(repair.buildRepairRequest(dryRun.observed, true).publish, true);
++});
++
++test('the program slug comes from the caseworker selection', () => {
++  assert.equal(repair.repairProgramSlug(['wic']), 'wic');
++  assert.equal(repair.repairProgramSlug(['calfresh', 'medical', 'calworks']), 'calfresh');
++  assert.equal(repair.repairProgramSlug(['not-a-program', 'ihss']), 'ihss');
++  assert.equal(repair.repairProgramSlug([]), null);
++  assert.equal(repair.repairProgramSlug(undefined), null);
++});
++
++test('sentences describe the service result and do not invent a map', () => {
++  const observed = [
++    { selector: '#case-number', label: 'Case number', type: 'text', count: 1 },
++  ];
++  const proposal = repair.readRepairProposal({
++    publishable: false,
++    refused: 'Refused to guess ssn.',
++    kept: [],
++    moved: [],
++    unresolved: [{
++      purpose: 'ssn',
++      fromSelector: '#ssn',
++      toSelector: null,
++      disposition: 'unresolved',
++      reason: 'No unique label match for ssn.',
++      value: '123-45-6789',
++    }],
++    unmapped: [{ selector: '#case-number', label: 'Case number', reason: 'On the page, and not claimed.' }],
++    probes: [],
++    fieldMap: [{ fieldKey: '#case-number', purpose: 'ssn', value: '123-45-6789' }],
++  });
++  assert.equal(proposal.fieldMap, undefined);
++  assert.equal(JSON.stringify(proposal).includes('123-45-6789'), false);
++  const presented = repair.presentRepair(proposal, observed, LABELS);
++  assert.equal(presented.publishable, false);
++  assert.equal(presented.fieldMap, undefined);
++  assert.equal(presented.refused[0].kind, 'protected');
++  assert.match(presented.refused[0].sentence, /Case number/);
++  assert.match(presented.refused[0].sentence, /did not move onto/);
++  assert.equal(presented.unmapped[0].label, 'Case number');
++  assert.match(presented.publishNote, /cannot be published/);
++});
++
++test('a tie, a signature date, and a missing label stay unresolved in the wording', () => {
++  const tie = repair.presentRepair({
++    publishable: false,
++    refused: 'Refused to guess ssn.',
++    kept: [],
++    moved: [],
++    unresolved: [{ purpose: 'ssn', fromSelector: '#ssn', toSelector: null, reason: 'No unique label match for ssn.' }],
++    unmapped: [],
++    probes: [],
++  }, [
++    { selector: '#ssn-a', label: 'Social Security Number', type: 'text', count: 1 },
++    { selector: '#ssn-b', label: 'Social Security Number', type: 'text', count: 1 },
++  ], LABELS);
++  assert.equal(tie.refused[0].kind, 'tie');
++  assert.match(tie.refused[0].sentence, /will not guess/);
++
++  const signature = repair.presentRepair({
++    publishable: false,
++    refused: 'Refused to guess dateOfBirth.',
++    kept: [],
++    moved: [],
++    unresolved: [{ purpose: 'dateOfBirth', fromSelector: '#dob', toSelector: null, reason: 'No unique label match.' }],
++    unmapped: [],
++    probes: [],
++  }, [
++    { selector: '#signed-on', label: 'Signature date', type: 'date', count: 1 },
++  ], LABELS);
++  assert.equal(signature.refused[0].kind, 'protected');
++  assert.match(signature.refused[0].sentence, /signature date is not a date of birth/i);
++
++  const missing = repair.presentRepair({
++    publishable: false,
++    refused: '1 field(s) had no unique label match (phone).',
++    kept: [],
++    moved: [],
++    unresolved: [{ purpose: 'phone', fromSelector: '#phone', toSelector: null, reason: 'No unique label match for phone.' }],
++    unmapped: [{ selector: '#notes', label: '', reason: 'On the page.' }],
++    probes: [],
++  }, [
++    { selector: '#notes', label: '', type: 'text', count: 1 },
++  ], LABELS);
++  assert.equal(missing.refused[0].kind, 'missing');
++  assert.equal(missing.unmapped[0].label, 'No label');
++});
++
++test('kept and moved lines quote the selectors the service returned', () => {
++  const presented = repair.presentRepair({
++    publishable: true,
++    refused: null,
++    kept: [{ purpose: 'email', fromSelector: '#email', toSelector: '#email', reason: 'The previous selector still resolves to one control.' }],
++    moved: [{
++      purpose: 'phone',
++      fromSelector: '#old-phone',
++      toSelector: '#applicant-phone',
++      reason: 'The label "Phone" is the only control that still names this field.',
++    }],
++    unresolved: [],
++    unmapped: [],
++    probes: ['#email', '#applicant-phone'],
++  }, [
++    { selector: '#email', label: 'Email', type: 'email', count: 1 },
++    { selector: '#applicant-phone', label: 'Phone', type: 'tel', count: 1 },
++  ], LABELS);
++  assert.equal(presented.publishable, true);
++  assert.equal(presented.kept[0].selector, '#email');
++  assert.match(presented.kept[0].sentence, /still at #email/);
++  assert.deepEqual(presented.moved[0], {
++    label: 'Phone',
++    from: '#old-phone',
++    to: '#applicant-phone',
++    sentence: 'The label "Phone" is the only box that still names this field.',
++  });
++  assert.equal(presented.fieldMap, undefined);
++});
++
++test('the extension asks the page for an observation and does not map it locally', () => {
++  const agent = fs.readFileSync(path.join(root, 'content', 'form-agent.js'), 'utf8');
++  const panel = fs.readFileSync(path.join(root, 'sidepanel', 'sidepanel.js'), 'utf8');
++  const manifest = fs.readFileSync(path.join(root, 'manifest.json'), 'utf8');
++  assert.match(agent, /NAVA_OBSERVE_REPAIR/);
++  assert.match(agent, /collectObservations\(document\)/);
++  assert.match(agent, /buildRepairRequest\(collected\.observed, false\)/);
++  assert.doesNotMatch(agent, /proposeRepair/);
++  const background = fs.readFileSync(path.join(root, 'background.js'), 'utf8');
++  assert.match(background, /NAVA_OBSERVE_REPAIR/);
++  const writeCommands = background.slice(background.indexOf('WRITE_COMMAND_TYPES'), background.indexOf('ACTIVE_LEASE_MS'));
++  assert.doesNotMatch(writeCommands, /NAVA_OBSERVE_REPAIR/);
++  assert.match(manifest, /shared\/repair-observe\.js/);
++  assert.match(panel, /Dry-run a playbook repair/);
++  assert.match(panel, /Still in the same place/);
++  assert.match(panel, /buildRepairRequest\(response\.observed, false\)/);
++  assert.match(panel, /if \(!current\?\.confirming \|\| !current\.presented\?\.publishable\)/);
++  assert.match(panel, /buildRepairRequest\(current\.observed, true\)/);
++  assert.doesNotMatch(panel, /proposeRepair/);
++  const publish = panel.slice(panel.indexOf('async function publishObservedRepair'), panel.indexOf('async function onClick'));
++  assert.ok(publish.indexOf('if (!current?.confirming || !current.presented?.publishable)') < publish.indexOf('buildRepairRequest(current.observed, true)'));
++});
+diff --git a/tests/sidepanel-orchestration.test.cjs b/tests/sidepanel-orchestration.test.cjs
+index 37c294b..ad93719 100644
+--- a/tests/sidepanel-orchestration.test.cjs
++++ b/tests/sidepanel-orchestration.test.cjs
+@@ -33,16 +33,18 @@ test('dynamic page-agent injection installs site adapters before the content age
+   const source = section('async function ensurePageAgent', 'async function sendToTab');
+   const formEngine = source.indexOf("'shared/form-engine.js'");
+   const siteAdapters = source.indexOf("'shared/site-adapters.js'");
++  const repairObserve = source.indexOf("'shared/repair-observe.js'");
+   const contentAgent = source.indexOf("'content/form-agent.js'");
+ 
+   assert.ok(formEngine >= 0);
+   assert.ok(formEngine < siteAdapters);
+-  assert.ok(siteAdapters < contentAgent);
++  assert.ok(siteAdapters < repairObserve);
++  assert.ok(repairObserve < contentAgent);
+ });
+ 
+ test('page-agent readiness is versioned and requires the exact live-site adapters', () => {
+   const source = section('async function ensurePageAgent', 'async function sendToTab');
+-  assert.match(panel, /const PAGE_AGENT_VERSION = 5/);
++  assert.match(panel, /const PAGE_AGENT_VERSION = 6/);
+   assert.match(source, /pong\.agentVersion === PAGE_AGENT_VERSION && pong\.adaptersReady/);
+   assert.match(source, /verified\.agentVersion === PAGE_AGENT_VERSION && verified\.adaptersReady/);
+   assert.match(source, /older form-filling agent.*Refresh this tab once/i);
