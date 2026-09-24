@@ -30,7 +30,7 @@ export default async function WorkPage({
 }) {
   const query = await searchParams;
   let desk = await loadWorkbench();
-  if (!desk) {
+  if (!desk || desk.programName !== 'IHSS') {
     await resetDemo();
     desk = await loadWorkbench();
   }
@@ -46,7 +46,16 @@ export default async function WorkPage({
   }
 
   const unverified = desk.fields.filter((item) => item.value && !item.verified);
-  const waitingOnClient = desk.missing.length > 0;
+  const requiredMissing = desk.missing.filter((item) => item.required);
+  const optionalMissing = desk.missing.filter((item) => !item.required);
+  const waitingOnClient = requiredMissing.length > 0;
+  const onRecord = desk.fields.filter(
+    (item) => item.value && item.source !== 'caseworker' && item.source !== 'participant',
+  );
+  const leftBlank = desk.fields.filter(
+    (item) => !item.value || /social security|medi-cal/i.test(item.label),
+  );
+  const fromClient = desk.fields.filter((item) => item.source === 'participant');
   const canConfirm =
     !desk.submittedAt &&
     !waitingOnClient &&
@@ -58,48 +67,83 @@ export default async function WorkPage({
   return (
     <main className="page">
       <div className="banner">
-        <h1>{desk.clientName} · WIC</h1>
+        <h1>
+          {desk.clientName} · {desk.programName}
+        </h1>
         <p>
-          {desk.organizationName}. You send the client a link for what you cannot fill. You still
-          submit. This desk records that. It does not send the form to the county.
+          {desk.organizationName}. Fields on the record are filled. You send the client a link for
+          what the record does not have. Identifiers stay blank unless a person enters them. You
+          still submit. This desk records that. It does not send the form to the county.
         </p>
       </div>
+
+      <p className="notice">
+        The last measured decision pass, on a 26-control page, cost $0.000310. This packet uses that
+        split: nine fields from the record, questions for the client, and identifiers left blank.
+      </p>
 
       {query.error ? <p className="problem">{query.error}</p> : null}
 
       <section>
-        <h2>Still missing</h2>
-        {waitingOnClient ? (
-          desk.missing.map((item) => (
-            <div className="question" key={item.question}>
-              <span className="label">{item.question}</span>
-              <div className="meta">
-                {item.required ? 'Required before you can finish' : 'Optional'}
-              </div>
-            </div>
-          ))
-        ) : (
-          <p>Nothing is missing. The client has answered, or there was nothing to ask.</p>
-        )}
-        {desk.participantUrl ? (
-          <p>
-            <a href={desk.participantUrl}>Open the client’s link</a>
-          </p>
-        ) : null}
-      </section>
-
-      <section>
-        <h2>What would go on the form</h2>
-        {desk.fields.map((item) => (
+        <h2>From the case record</h2>
+        {onRecord.map((item) => (
           <div className="fact" key={item.label}>
             <span className="label">{item.label}</span>
             <div>{displayValue(item.label, item.value)}</div>
             <div className="meta">
               {item.source ? (SOURCE[item.source] ?? item.source) : 'No source'}
-              {item.value ? (item.verified ? ' · Read back' : ' · Not read back yet') : ''}
+              {item.verified ? ' · Read back' : ' · Not read back yet'}
             </div>
           </div>
         ))}
+      </section>
+
+      <section>
+        <h2>Left blank</h2>
+        {leftBlank.map((item) => (
+          <div className="fact" key={item.label}>
+            <span className="label">{item.label}</span>
+            <div>{displayValue(item.label, item.value)}</div>
+            <div className="meta">
+              {item.value
+                ? 'Entered by a caseworker. The planner does not fill this.'
+                : 'Blank. The planner does not fill an identifier.'}
+            </div>
+          </div>
+        ))}
+      </section>
+
+      <section>
+        <h2>Ask the client</h2>
+        {requiredMissing.length === 0 && optionalMissing.length === 0 && fromClient.length === 0 ? (
+          <p>Nothing is missing.</p>
+        ) : null}
+        {fromClient.map((item) => (
+          <div className="fact" key={item.label}>
+            <span className="label">{item.label}</span>
+            <div>{displayValue(item.label, item.value)}</div>
+            <div className="meta">
+              The client told us{item.verified ? ' · Read back' : ' · Not read back yet'}
+            </div>
+          </div>
+        ))}
+        {requiredMissing.map((item) => (
+          <div className="question" key={item.question}>
+            <span className="label">{item.question}</span>
+            <div className="meta">Required before you can finish</div>
+          </div>
+        ))}
+        {optionalMissing.map((item) => (
+          <div className="question" key={item.question}>
+            <span className="label">{item.question}</span>
+            <div className="meta">Optional. You can review without this.</div>
+          </div>
+        ))}
+        {desk.participantUrl ? (
+          <p>
+            <a href={desk.participantUrl}>Open the client’s link</a>
+          </p>
+        ) : null}
       </section>
 
       <section>

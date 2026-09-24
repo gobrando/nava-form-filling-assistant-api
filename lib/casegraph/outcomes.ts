@@ -35,9 +35,7 @@ export type RecordOutcomeResult =
   | { ok: true; outcome: OutcomeRow }
   | { ok: false; status: 404 | 409; error: string };
 
-export function nextSimulatedUpdate(
-  current: 'submitted' | OutcomeStatus,
-): OutcomeInput | null {
+export function nextSimulatedUpdate(current: 'submitted' | OutcomeStatus): OutcomeInput | null {
   switch (current) {
     case 'submitted':
       return { status: 'received', recordedBy: 'county-mailroom' };
@@ -45,13 +43,13 @@ export function nextSimulatedUpdate(
       return {
         status: 'pending_documents',
         reasonCode: 'missing_documents',
-        followUp: 'Bring a photo ID and proof of a Riverside County address to the clinic.',
+        followUp: 'Bring a photo ID and proof of a Riverside County address.',
         recordedBy: 'county-mailroom',
       };
     case 'pending_documents':
       return {
         status: 'approved',
-        followUp: 'The clinic will call to schedule the first appointment.',
+        followUp: 'The county will contact the household to schedule the first visit.',
         recordedBy: 'county-mailroom',
       };
     case 'approved':
