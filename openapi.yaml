@@ -899,9 +899,13 @@ paths:
       security: []
       description: |
         Local-only. No API key. Form action is one of reset, verify, confirm,
-        submit, or outcome. `submit` records that a person submitted on the
-        demo desk. It does not send a form to a county. Returns 404 in
-        production. Redirects back to `/work`.
+        submit, outcome, or publish-repair. `submit` records that a person
+        submitted on the demo desk. It does not send a form to a county.
+        `publish-repair` saves a tenant playbook version for the demo
+        organization after a dry run says the repair can be published. It does
+        not edit the shared playbook, and it does not send a form. Returns 404
+        in production. Packet actions redirect to `/work`. `publish-repair`
+        redirects to `/work/repair`.
       requestBody:
         required: true
         content:
@@ -912,9 +916,12 @@ paths:
               properties:
                 action:
                   type: string
-                  enum: [reset, verify, confirm, submit, outcome]
+                  enum: [reset, verify, confirm, submit, outcome, publish-repair]
+                form:
+                  type: string
+                  description: Which open form to publish. Used with publish-repair. `wic` or `ihss`.
       responses:
-        '303': { description: Redirects to the caseworker desk. }
+        '303': { description: Redirects to the caseworker desk or the repair desk. }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { description: Not available in production. }
 
