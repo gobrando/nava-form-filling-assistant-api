@@ -74,9 +74,9 @@ describe('a WIC-like drift', () => {
     expect(item.publishable).toBe(true);
     expect(item.kept.map((entry) => entry.toSelector)).toEqual(['#edit-email']);
     expect(item.proposal.fieldMap.map((entry) => entry.fieldKey)).toEqual([
+      '#edit-email',
       '#saltmere-name',
       '#saltmere-phone',
-      '#edit-email',
       '#saltmere-zip',
       '#saltmere-clinic',
       '#saltmere-language',
