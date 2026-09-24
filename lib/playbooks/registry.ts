@@ -1,7 +1,7 @@
 import type { Tx } from '@/lib/db';
 import { playbook } from '@/lib/db/schema';
 import type { ExecutionMode } from '@/lib/vocabulary';
-import { and, desc, eq, isNull, or } from 'drizzle-orm';
+import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
 
 /**
  * Playbook resolution and the warm/cold routing decision.
@@ -23,6 +23,10 @@ export type PlaybookRow = typeof playbook.$inferSelect;
  * The best playbook for a program: a tenant's own override first, then shared
  * control-plane knowledge, highest version first.
  *
+ * `ORDER BY tenantId DESC` does not do this. Postgres sorts NULLS FIRST on a
+ * descending column, so a shared row would hide the override. The null check
+ * is explicit for that reason.
+ *
  * Row-level security already restricts the tenant column to the caller's tenant
  * or NULL, so this ordering is a preference, not a boundary.
  */
@@ -35,7 +39,7 @@ export async function resolvePlaybookForProgram(
     .select()
     .from(playbook)
     .where(or(eq(playbook.tenantId, tenantId), isNull(playbook.tenantId)))
-    .orderBy(desc(playbook.tenantId), desc(playbook.version));
+    .orderBy(sql`${playbook.tenantId} is null`, desc(playbook.version));
 
   return rows.find((row) => row.programIds.includes(programId)) ?? null;
 }
@@ -54,7 +58,7 @@ export async function resolvePlaybookForDomain(
         or(eq(playbook.tenantId, tenantId), isNull(playbook.tenantId)),
       ),
     )
-    .orderBy(desc(playbook.tenantId), desc(playbook.version));
+    .orderBy(sql`${playbook.tenantId} is null`, desc(playbook.version));
 
   return rows[0] ?? null;
 }
@@ -111,9 +115,10 @@ export function evaluateProbes(row: PlaybookRow, results: ProbeResult[]): ProbeV
 /**
  * Marks a playbook stale so the next run skips the warm path.
  *
- * Repair is the scribe's job: it writes and repairs scripts, plans for new
- * sites, heals broken ones, and otherwise stays idle. Staleness is the signal that wakes it,
- * which is why this does not attempt a fix inline.
+ * Repair is a separate step. The deterministic scribe
+ * (`lib/playbooks/scribe.ts`) can publish a tenant override when every old
+ * field still has one unambiguous control. The model scribe is for the cases
+ * that function refuses. This does not attempt a fix inline.
  */
 export async function markStale(tx: Tx, playbookId: string, reason: string): Promise<void> {
   await tx

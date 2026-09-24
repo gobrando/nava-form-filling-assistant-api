@@ -1,0 +1,49 @@
+<!doctype html>
+<!--
+  The WIC fixture after a site change.
+
+  Every question is still there. The ids are not. `#case-number` is a decoy:
+  a repair that maps a name or a ZIP onto it has guessed, and the scribe must
+  not guess. The old `#edit-submit` id is gone; the new button is still a
+  submit control and is not a field.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Apply for WIC — drifted fixture</title>
+  </head>
+  <body>
+    <h1>Apply for WIC</h1>
+    <form id="wic-application">
+      <label for="applicant-name">Name</label>
+      <input id="applicant-name" name="name" type="text" required />
+
+      <label for="applicant-phone">Phone</label>
+      <input id="applicant-phone" name="phone" type="tel" />
+
+      <label for="applicant-email">Email</label>
+      <input id="applicant-email" name="email" type="email" />
+
+      <label for="applicant-zip">ZIP code</label>
+      <input id="applicant-zip" name="zip" type="text" maxlength="4" />
+
+      <label for="applicant-language">Preferred language</label>
+      <select id="applicant-language" name="preferred_language">
+        <option value="">- Select -</option>
+        <option>English</option>
+        <option>Spanish</option>
+      </select>
+
+      <label for="wic-clinic">Please choose the WIC clinic closest to you</label>
+      <select id="wic-clinic" name="clinic" required>
+        <option value="">- Select -</option>
+        <option>Riverside WIC</option>
+      </select>
+
+      <label for="case-number">Case number</label>
+      <input id="case-number" name="case_number" type="text" />
+
+      <button id="submit-application" type="submit">Submit</button>
+    </form>
+  </body>
+</html>

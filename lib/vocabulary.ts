@@ -225,6 +225,7 @@ export const AUDIT_EVENT_TYPES = [
   'session_ended',
   'audit_exported',
   'outcome_recorded',
+  'playbook_repaired',
 ] as const;
 
 export const auditEventTypeSchema = z.enum(AUDIT_EVENT_TYPES);

@@ -322,6 +322,37 @@ constraint proves nothing.
 
 ---
 
+## When the site changes
+
+A failed freshness probe used to have one continuation: start Eve, if you have
+a model key. Most changes are smaller than that. The questions are the same
+and the ids are not.
+
+`POST /v1/programs/{slug}/playbook/repair` takes the controls the caller
+already has on screen — selector, label, type, count. It does not take values.
+Leave `publish` off for a dry run. The scribe keeps a selector that still
+matches one element, and moves a field only when a single label uniquely names
+it. Publishing writes a **new version on that tenant**. The shared playbook is
+left alone, so another county does not inherit an unreviewed map.
+
+A protected field does not move onto a nearby identifier. An SSN with a
+"Social Security Number" label moves; an SSN with only a "Case number" on the
+page stays unresolved, and publish is refused. Two controls with the same
+label are a tie, which is also a refusal. The model scribe is for that case,
+not for the case this one can already prove.
+
+The same observation can be sent on `POST /v1/applications` with
+`"repair": true`. When the repair is safe, the response is the warm plan
+(`201`, `executionMode: "script"`) instead of a request for an agent key.
+
+```bash
+pnpm rehearse
+```
+
+That runs the drifted WIC fixture and an SSN-versus-case-number check with no
+database and no model. The ZIP field on that fixture still truncates, so a
+repaired playbook does not skip readback.
+
 ## What is and isn't proven
 
 | | Status |
@@ -331,7 +362,8 @@ constraint proves nothing.
 | Live Apricot reads and import | Tested against a wire-format mock, not yet against a real instance |
 | Agent tree (orchestrator + 4 subagents) | Compiles (`pnpm eve:info`: 0 errors, 7 tools, 2 skills, 4 subagents) |
 | Agent browser tool | Tested in a real Chromium, without a model driving it |
-| **Cold path with a real model** | **Not yet run.** It needs an Anthropic key or Vertex credentials. |
+| Deterministic scribe: a stale page repaired into a warm playbook | Proven without a model. `pnpm rehearse`, and `tests/scribe.test.ts` |
+| **Cold path with a real model** | **Not yet run.** It needs an Anthropic key or Vertex credentials. The scribe above handles the case where every old field still has one unambiguous label. |
 | Production auth (per-tenant SSO) | Not built. API keys and a signed-cookie placeholder today. |
 
 ---
