@@ -339,7 +339,10 @@ A protected field does not move onto a nearby identifier. An SSN with a
 "Social Security Number" label moves; an SSN with only a "Case number" on the
 page stays unresolved, and publish is refused. Two controls with the same
 label are a tie, which is also a refusal. The model scribe is for that case,
-not for the case this one can already prove.
+not for the case this one can already prove. A refused dry run returns that
+case as a brief (`lib/playbooks/refusal-brief.ts`): the unresolved fields and
+why, the labels that collided, and the controls left unmapped. The brief does
+not start Eve, and it does not carry household values.
 
 The same observation can be sent on `POST /v1/applications` with
 `"repair": true`. When the repair is safe, the response is the warm plan
@@ -365,9 +368,11 @@ is the drifted WIC form, as a dry run. Open
 for an IHSS-sized drifted form. The page lists what stayed on the old selector,
 what moved (old selector, new selector, and the label), and what was refused:
 a tie, a protected field that would have landed on the wrong label, or a label
-that is missing. It does not show household values. The WIC ZIP box still holds
-4 characters, and the page says so, because a repaired playbook does not skip
-readback.
+that is missing. When a field is refused, the page also says a model would
+still have to decide and names each block. When the map can be published, that
+section says the model is not required. It does not show household values. The
+WIC ZIP box still holds 4 characters, and the page says so, because a repaired
+playbook does not skip readback.
 
 Publishing is a separate action. The page names it: `POST /v1/programs/{slug}/playbook/repair`
 with the same observation and `"publish": true`, after the proposal says it can

@@ -6,6 +6,7 @@ import {
 } from '@/lib/demo/repair-query';
 import { wicSeedPlaybook } from '@/lib/playbooks/data';
 import { observeHtml } from '@/lib/playbooks/observe-html';
+import { refusalBrief } from '@/lib/playbooks/refusal-brief';
 import type { PlaybookRow } from '@/lib/playbooks/registry';
 import {
   type ObservedControl,
@@ -40,6 +41,12 @@ export type RepairLine = {
   sentence: string;
 };
 
+export type ModelField = {
+  fieldKey: string;
+  label: string;
+  sentence: string;
+};
+
 export type MovedLine = RepairLine & {
   from: string;
   to: string;
@@ -64,6 +71,9 @@ export type RepairDesk = {
   unmapped: RepairLine[];
   publishable: boolean;
   publishNote: string;
+  modelRequired: boolean;
+  modelFields: ModelField[];
+  modelNote: string | null;
   proposal: RepairProposal | null;
 };
 
@@ -300,7 +310,25 @@ function presentDesk(
     }),
     publishable: proposal.publishable,
     publishNote: publishNote(form, proposal),
+    ...modelSection(proposal, observed),
     proposal,
+  };
+}
+
+function modelSection(
+  proposal: RepairProposal,
+  observed: ObservedControl[],
+): { modelRequired: boolean; modelFields: ModelField[]; modelNote: string | null } {
+  const brief = refusalBrief(proposal, observed);
+  if (!brief.modelRequired) return { modelRequired: false, modelFields: [], modelNote: null };
+  return {
+    modelRequired: true,
+    modelFields: brief.unresolved.map((field) => ({
+      fieldKey: field.fieldKey,
+      label: field.label,
+      sentence: field.detail,
+    })),
+    modelNote: brief.unresolved.length === 0 ? proposal.refused : null,
   };
 }
 
@@ -421,6 +449,9 @@ function emptyDesk(rejected: string, notice: RepairNotice | null): RepairDesk {
     unmapped: [],
     publishable: false,
     publishNote: '',
+    modelRequired: false,
+    modelFields: [],
+    modelNote: null,
     proposal: null,
   };
 }

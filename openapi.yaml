@@ -486,7 +486,10 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/WarmRunStarted' }
         '202':
-          description: Cold run started, or awaiting an agent key.
+          description: |
+            Awaiting an agent key, or a cold run started because `agentApiKey`
+            was sent. A refused repair includes `repair.brief` and does not
+            start the agent by itself.
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -1201,6 +1204,12 @@ paths:
         tenant. The shared playbook is not edited, and nothing is submitted.
 
         The next run that probes the new selectors takes the warm path.
+
+        A refused dry run also returns `brief`: the unresolved fields and why
+        (a tie, a protected field that would land on the wrong label, a missing
+        label, or a field that was dropped), the labels that collided, and the
+        controls left unmapped. Counts, field keys, and labels only. The brief
+        does not start a model. A publishable dry run omits `brief`.
       parameters: [{ $ref: '#/components/parameters/programSlug' }]
       requestBody:
         required: true
@@ -1230,7 +1239,19 @@ paths:
                       count: { type: integer, minimum: 0 }
       responses:
         '200':
-          description: Dry run. `published` is null. `proposal.publishable` says whether a later publish would succeed.
+          description: |
+            Dry run. `published` is null. `proposal.publishable` says whether a
+            later publish would succeed. When the proposal is refused, `brief`
+            is a RepairRefusalBrief. When it can be published, `brief` is omitted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  published: { nullable: true }
+                  brief:
+                    $ref: '#/components/schemas/RepairRefusalBrief'
         '201':
           description: A tenant playbook version was published, or the same map was already current.
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -1489,6 +1510,75 @@ components:
             blockers: { type: array, items: { type: string } }
             reviewerPrincipal: { type: string, nullable: true }
             attestedAt: { type: string, format: date-time, nullable: true }
+
+    RepairObservedControl:
+      type: object
+      additionalProperties: false
+      required: [selector, label, count]
+      properties:
+        selector: { type: string }
+        label: { type: string }
+        count: { type: integer, minimum: 0 }
+
+    RepairRefusalBrief:
+      type: object
+      additionalProperties: false
+      description: |
+        Counts, field keys, and labels from a refused repair. Household values
+        are not accepted on the request and are not returned here. Publishing
+        stays all or nothing, and this object does not start a model.
+      required: [modelRequired, text, unresolved, collisions, unmapped, rules]
+      properties:
+        modelRequired: { type: boolean, enum: [true] }
+        text:
+          type: string
+          description: Prose the model scribe can read. It names the same fields as `unresolved`.
+        unresolved:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [fieldKey, purpose, label, reason, detail, controls]
+            properties:
+              fieldKey: { type: string }
+              purpose: { type: string, nullable: true }
+              label: { type: string }
+              reason:
+                type: string
+                enum:
+                  - tie
+                  - protected field would land on the wrong label
+                  - label missing
+                  - field dropped
+              detail: { type: string }
+              controls:
+                type: array
+                items: { $ref: '#/components/schemas/RepairObservedControl' }
+        collisions:
+          type: array
+          description: Observed labels that appeared on more than one control.
+          items:
+            type: object
+            additionalProperties: false
+            required: [label, controls]
+            properties:
+              label: { type: string }
+              controls:
+                type: array
+                items: { $ref: '#/components/schemas/RepairObservedControl' }
+        unmapped:
+          type: array
+          items: { $ref: '#/components/schemas/RepairObservedControl' }
+        rules:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            type: string
+            enum:
+              - Do not infer protected fields.
+              - Do not submit.
+              - Readback is still required for anything that does get filled.
 
     AuditEvent:
       type: object

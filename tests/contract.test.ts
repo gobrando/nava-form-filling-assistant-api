@@ -82,6 +82,23 @@ describe('openapi.yaml matches the implementation', () => {
     expect(unsecured).toEqual([]);
   });
 
+  it('documents the refusal brief on a refused repair dry run', () => {
+    const repair = spec.paths['/v1/programs/{slug}/playbook/repair']?.post;
+    const text = JSON.stringify(repair);
+    expect(text).toContain('RepairRefusalBrief');
+    expect(text).toContain('is omitted');
+    const schema = spec.components.schemas.RepairRefusalBrief;
+    expect(schema).toBeDefined();
+    const described = JSON.stringify(schema);
+    expect(described).toContain('tie');
+    expect(described).toContain('protected field would land on the wrong label');
+    expect(described).toContain('label missing');
+    expect(described).toContain('field dropped');
+    expect(described).toContain('Do not infer protected fields.');
+    expect(described).toContain('Do not submit.');
+    expect(described).toContain('Readback is still required for anything that does get filled.');
+  });
+
   it('never describes a submit operation that submits', () => {
     const submit = spec.paths['/v1/applications/{id}/submit']?.post;
     expect(submit).toBeDefined();

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { wicSeedPlaybook } from '@/lib/playbooks/data';
 import { observeHtml } from '@/lib/playbooks/observe-html';
+import { briefForDryRun, refusalBrief } from '@/lib/playbooks/refusal-brief';
 import type { PlaybookRow } from '@/lib/playbooks/registry';
 import { proposeRepair } from '@/lib/playbooks/scribe';
 
@@ -59,6 +60,33 @@ if (ssnTrap.fieldMap[0]?.fieldKey !== '#applicant-ssn') {
 }
 if (ssnTrap.fieldMap.some((entry) => entry.fieldKey === '#case-number')) {
   failures.push('SSN was placed on the case number');
+}
+
+const wicBrief = refusalBrief(proposal, observed);
+if (wicBrief.modelRequired || wicBrief.text !== 'The model is not required for the map.') {
+  failures.push('publishable WIC drift should not require a model');
+}
+
+const ssnRefusalObserved = [
+  { selector: '#case-number', label: 'Case number', type: 'text', count: 1 },
+];
+const ssnRefusal = proposeRepair(
+  {
+    ...previous,
+    probes: ['#ssn'],
+    fieldMap: [{ fieldKey: '#ssn', purpose: 'ssn', inputType: 'text', method: 'keys' }],
+  },
+  ssnRefusalObserved,
+);
+const ssnBrief = briefForDryRun(ssnRefusal, ssnRefusalObserved);
+if (!ssnBrief) {
+  failures.push('SSN refusal did not produce a brief');
+} else if (!ssnBrief.text.includes('protected field would land on the wrong label')) {
+  failures.push('SSN brief did not name the block');
+} else if (!ssnBrief.text.includes('#case-number') || !ssnBrief.text.includes('#ssn')) {
+  failures.push('SSN brief did not name the field and the case number');
+} else if (/\d{3}-\d{2}-\d{4}/.test(JSON.stringify(ssnBrief))) {
+  failures.push('SSN brief contained a value');
 }
 
 console.log(

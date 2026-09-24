@@ -10,6 +10,7 @@ import { fail, ok, preflight, readJson } from '@/lib/http';
 import { briefForAgent, conservativeDecisions, hintedDecisions } from '@/lib/planner/brief';
 import { decideFields, estimateJevCostUsd, jevKey } from '@/lib/planner/jev';
 import { allowedPurposeSet } from '@/lib/planner/run';
+import { briefForDryRun } from '@/lib/playbooks/refusal-brief';
 import { evaluateProbes, resolvePlaybookForProgram } from '@/lib/playbooks/registry';
 import { observedControlSchema, proposeRepair, publishRepair } from '@/lib/playbooks/scribe';
 import { inputTypeSchema, planWorkflows } from '@/lib/vocabulary';
@@ -215,6 +216,9 @@ export async function POST(request: Request) {
       }
     }
 
+    const modelBrief =
+      repairSummary && body.observed ? briefForDryRun(repairSummary, body.observed) : null;
+
     const [row] = await tx
       .insert(application)
       .values({
@@ -304,7 +308,7 @@ export async function POST(request: Request) {
           next: repairSummary?.publishable
             ? 'The repair did not clear the freshness check. Retry with agentApiKey to start the agent.'
             : repairSummary
-              ? 'The deterministic scribe refused to guess. Retry with agentApiKey, or send a clearer observation to POST /v1/programs/{slug}/playbook/repair.'
+              ? 'The deterministic scribe refused to guess. repair.brief names the fields still open and does not start the agent. Retry with agentApiKey only if you mean to start it.'
               : 'This site needs the agent. Retry with agentApiKey to start it, or with repair and an observation of the page.',
           repair: repairSummary
             ? {
@@ -313,6 +317,7 @@ export async function POST(request: Request) {
                 unresolved: repairSummary.unresolved.length,
                 moved: repairSummary.moved.length,
                 kept: repairSummary.kept.length,
+                ...(modelBrief ? { brief: modelBrief } : {}),
               }
             : null,
           jev: jevSummary,
@@ -330,9 +335,7 @@ export async function POST(request: Request) {
         playbook
           ? `A playbook exists at version ${playbook.version} but is not fresh. Confirm its field map rather than rebuilding it, and note which selectors moved.`
           : 'There is no playbook for this site. Survey it, then have the scribe write one.',
-        repairSummary && !repairSummary.publishable
-          ? `The deterministic scribe already refused this observation: ${repairSummary.refused} Do not guess those fields.`
-          : '',
+        modelBrief ? modelBrief.text : '',
         jevBrief,
       ]
         .filter(Boolean)

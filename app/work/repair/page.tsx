@@ -97,6 +97,27 @@ export default async function RepairPage({
           </section>
 
           <section>
+            <h2>A model would still have to decide</h2>
+            {desk.modelRequired ? (
+              <>
+                {desk.modelNote ? <p>{desk.modelNote}</p> : null}
+                {desk.modelFields.map((item) => (
+                  <div className="question" key={item.fieldKey}>
+                    <span className="label">{item.label}</span>
+                    <div className="meta">{item.sentence}</div>
+                  </div>
+                ))}
+                <p>
+                  Do not infer protected fields. Do not submit. Readback is still required for
+                  anything that does get filled.
+                </p>
+              </>
+            ) : (
+              <p>The model is not required for the map.</p>
+            )}
+          </section>
+
+          <section>
             <h2>Publishing</h2>
             <p>{desk.publishNote}</p>
             {showPublishButton ? (

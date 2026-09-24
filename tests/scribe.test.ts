@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { wicSeedPlaybook } from '@/lib/playbooks/data';
 import { observeHtml } from '@/lib/playbooks/observe-html';
+import { briefForDryRun, refusalBrief } from '@/lib/playbooks/refusal-brief';
 import type { PlaybookRow } from '@/lib/playbooks/registry';
 import { observedControlSchema, proposeRepair } from '@/lib/playbooks/scribe';
 import { describe, expect, it } from 'vitest';
@@ -88,6 +89,15 @@ describe('a drifted WIC page', () => {
   it('probes the controls that moved, not the case number and not the submit button', () => {
     expect(proposal.probes).toEqual(['#applicant-name', '#wic-clinic']);
     expect(proposal.unmapped.map((control) => control.selector)).toEqual(['#case-number']);
+  });
+
+  it('says the model is not required, and the dry run omits the brief', () => {
+    expect(refusalBrief(proposal, observed)).toEqual({
+      modelRequired: false,
+      text: 'The model is not required for the map.',
+    });
+    expect(briefForDryRun(proposal, observed)).toBeNull();
+    expect(JSON.stringify(refusalBrief(proposal, observed))).not.toMatch(/\d{3}-\d{2}-\d{4}/);
   });
 });
 
@@ -241,5 +251,128 @@ describe('refusals', () => {
     expect(proposal.kept).toHaveLength(1);
     expect(proposal.moved).toHaveLength(0);
     expect(proposal.fieldMap[0]).toMatchObject({ method: 'keys', mask: 'MM/DD/YYYY' });
+  });
+});
+
+describe('a refusal brief', () => {
+  const sample = '900-12-3456';
+
+  it('names the SSN block and does not carry a value', () => {
+    const observed = [{ selector: '#case-number', label: 'Case number', type: 'text', count: 1 }];
+    const proposal = proposeRepair(
+      row({
+        probes: ['#ssn'],
+        fieldMap: [{ fieldKey: '#ssn', purpose: 'ssn', inputType: 'text', method: 'keys' }],
+      }),
+      observed,
+    );
+    const brief = briefForDryRun(proposal, observed);
+    expect(proposal.publishable).toBe(false);
+    expect(brief?.modelRequired).toBe(true);
+    expect(brief?.unresolved).toEqual([
+      expect.objectContaining({
+        fieldKey: '#ssn',
+        purpose: 'ssn',
+        label: 'Social Security Number',
+        reason: 'protected field would land on the wrong label',
+        controls: [{ selector: '#case-number', label: 'Case number', count: 1 }],
+      }),
+    ]);
+    expect(brief?.unmapped).toEqual([{ selector: '#case-number', label: 'Case number', count: 1 }]);
+    expect(brief?.collisions).toEqual([]);
+    expect(brief?.rules).toEqual([
+      'Do not infer protected fields.',
+      'Do not submit.',
+      'Readback is still required for anything that does get filled.',
+    ]);
+    const text = brief?.text ?? '';
+    expect(text).toContain('#ssn');
+    expect(text).toContain('Case number');
+    expect(text).toContain('#case-number');
+    expect(text).toContain('protected field would land on the wrong label');
+    expect(text).toContain('Do not infer protected fields.');
+    expect(text).toContain('Do not submit.');
+    expect(text).toContain('Readback is still required for anything that does get filled.');
+    expect(JSON.stringify(brief)).not.toContain(sample);
+    expect(JSON.stringify(brief)).not.toMatch(/\d{3}-\d{2}-\d{4}/);
+  });
+
+  it('rejects an observation that includes a value and does not echo it', () => {
+    const observed = [
+      { selector: '#case-number', label: 'Case number', type: 'text', count: 1, value: sample },
+    ];
+    const proposal = proposeRepair(
+      row({
+        probes: ['#ssn'],
+        fieldMap: [{ fieldKey: '#ssn', purpose: 'ssn', inputType: 'text', method: 'keys' }],
+      }),
+      [{ selector: '#case-number', label: 'Case number', type: 'text', count: 1 }],
+    );
+    expect(() => refusalBrief(proposal, observed)).toThrow(/included a value/);
+    try {
+      refusalBrief(proposal, observed);
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).not.toContain(sample);
+      expect((error as Error).message).not.toContain('900');
+    }
+  });
+
+  it('names both labels and selectors on a tie', () => {
+    const observed = [
+      { selector: '#ssn-a', label: 'Social Security Number', type: 'text', count: 1 },
+      { selector: '#ssn-b', label: 'Social Security Number', type: 'text', count: 1 },
+    ];
+    const proposal = proposeRepair(
+      row({
+        probes: ['#ssn'],
+        fieldMap: [{ fieldKey: '#ssn', purpose: 'ssn', inputType: 'text' }],
+      }),
+      observed,
+    );
+    const brief = refusalBrief(proposal, observed);
+    expect(brief.modelRequired).toBe(true);
+    if (!brief.modelRequired) return;
+    expect(brief.unresolved.map((field) => field.reason)).toEqual(['tie']);
+    expect(brief.unresolved[0]?.controls).toEqual([
+      { selector: '#ssn-a', label: 'Social Security Number', count: 1 },
+      { selector: '#ssn-b', label: 'Social Security Number', count: 1 },
+    ]);
+    expect(brief.collisions).toEqual([
+      {
+        label: 'Social Security Number',
+        controls: [
+          { selector: '#ssn-a', label: 'Social Security Number', count: 1 },
+          { selector: '#ssn-b', label: 'Social Security Number', count: 1 },
+        ],
+      },
+    ]);
+    expect(brief.text).toContain('#ssn-a');
+    expect(brief.text).toContain('#ssn-b');
+    expect(brief.text).toContain('Social Security Number');
+    expect(JSON.stringify(brief)).not.toMatch(/\d{3}-\d{2}-\d{4}/);
+  });
+
+  it('calls a name that is not unique a field that was dropped', () => {
+    const observed = [{ selector: '#name', label: 'Name', type: 'text', count: 1 }];
+    const proposal = proposeRepair(
+      row({
+        probes: ['#full'],
+        fieldMap: [
+          { fieldKey: '#full', purpose: 'fullName', inputType: 'text', required: true },
+          { fieldKey: '#first', purpose: 'firstName', inputType: 'text' },
+        ],
+      }),
+      observed,
+    );
+    const brief = refusalBrief(proposal, observed);
+    expect(brief.modelRequired).toBe(true);
+    if (!brief.modelRequired) return;
+    expect(brief.unresolved.map((field) => [field.fieldKey, field.reason])).toEqual([
+      ['#full', 'field dropped'],
+      ['#first', 'field dropped'],
+    ]);
+    expect(brief.text).toContain('#name');
+    expect(brief.text).toContain('field dropped');
   });
 });
