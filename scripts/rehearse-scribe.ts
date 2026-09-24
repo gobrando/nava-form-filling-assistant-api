@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { wicSeedPlaybook } from '@/lib/playbooks/data';
-import { observeHtml } from '@/lib/playbooks/observe-html';
+import { controlMaxLengths, observeHtml } from '@/lib/playbooks/observe-html';
+import { readbackChecklist } from '@/lib/playbooks/readback';
 import { briefForDryRun, refusalBrief } from '@/lib/playbooks/refusal-brief';
 import type { PlaybookRow } from '@/lib/playbooks/registry';
 import { proposeRepair } from '@/lib/playbooks/scribe';
@@ -33,8 +34,17 @@ const previous = {
   updatedAt: new Date(),
 } satisfies PlaybookRow;
 
-const observed = observeHtml(readFileSync('tests/fixtures/wic-form-drifted.html', 'utf8'));
+const wicHtml = readFileSync('tests/fixtures/wic-form-drifted.html', 'utf8');
+const observed = observeHtml(wicHtml);
 const proposal = proposeRepair(previous, observed);
+const limits = controlMaxLengths(wicHtml);
+const checklist = readbackChecklist(
+  proposal,
+  observed.map((control) => {
+    const maxlength = limits.get(control.selector);
+    return maxlength === undefined ? control : { ...control, maxlength };
+  }),
+);
 
 const failures: string[] = [];
 if (!proposal.publishable) failures.push(`expected a publishable repair: ${proposal.refused}`);
@@ -60,6 +70,17 @@ if (ssnTrap.fieldMap[0]?.fieldKey !== '#applicant-ssn') {
 }
 if (ssnTrap.fieldMap.some((entry) => entry.fieldKey === '#case-number')) {
   failures.push('SSN was placed on the case number');
+}
+
+const zipReadback = checklist.find((item) => item.fieldKey === '#applicant-zip');
+if (!zipReadback || zipReadback.reason !== 'truncation' || zipReadback.label !== 'ZIP code') {
+  failures.push('WIC ZIP was not listed as truncation');
+}
+if (checklist.some((item) => item.fieldKey === '#applicant-name' || item.label === 'Name')) {
+  failures.push('an ordinary name field was listed for readback');
+}
+if (/\d{3}-\d{2}-\d{4}/.test(JSON.stringify(checklist))) {
+  failures.push('readback checklist contained a value');
 }
 
 const wicBrief = refusalBrief(proposal, observed);
@@ -101,6 +122,7 @@ console.log(
       })),
       probes: proposal.probes,
       unmapped: proposal.unmapped.map((item) => item.selector),
+      readback: checklist,
       ssnTrap: ssnTrap.fieldMap.map((entry) => ({
         purpose: entry.purpose,
         fieldKey: entry.fieldKey,
