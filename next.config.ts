@@ -1,9 +1,8 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  // The API is the product; there is no UI surface in this service. Keeping
-  // `output: 'standalone'` makes the Dockerfile viable for Cloud Run, which is
-  // where labs-asp production runs — see README "Deploy target".
+  // The API serves the partner contract. One page, /participate/[token], is the
+  // participant check-in: masked facts and open questions, with no submit control.
   output: 'standalone',
   serverExternalPackages: ['postgres'],
 };

@@ -291,6 +291,9 @@ Turning a connection live is configuration, not code:
    pin it to one Apricot form (`sourceId`), and record the reviewed field
    mapping (`mappings`, Apricot field id to canonical key).
 
+`pnpm apricot` checks the `APRICOT_RIVERSIDE` prefix and prints only the host
+and the token HTTP status. It does not print the token.
+
 Only mapped fields become facts. A field Apricot adds later is counted and
 dropped until someone reviews what it means. A record from a different form is
 a 404, never a cross-form read. Connectors are **read-only**: nothing is
@@ -344,7 +347,8 @@ API Gateway directly.
 
 ```
 app/v1/            Route handlers: the partner-facing API
-lib/casegraph/     Facts ledger, gaps, fill plan, packet, submit gate
+lib/casegraph/     Facts ledger, gaps, fill plan, packet, submit gate, outcomes
+lib/planner/       Shared mapper / gap / reviewer engine and the five-model score
 lib/connectors/    Apricot 360: demo mode and live mode
 lib/playbooks/     Served playbooks and freshness probes
 lib/browser/       Browser transport and the policy that refuses submits
@@ -354,6 +358,62 @@ agent/             The cold path: Eve orchestrator, subagents, skills, tools
 scripts/prove.ts   The end-to-end HTTP proof
 tests/             See above
 ```
+
+## After submission
+
+`POST /v1/applications/{id}/submit` records that a person submitted. It does not
+submit. What the county does next is a separate, append-only history:
+
+`received` → `pending_documents` or `approved` or `denied` → `benefit_received`.
+
+A denial or a document request needs a reason code (`missing_documents`,
+`ineligible_income`, and the rest of the list in the OpenAPI spec). The
+optional follow-up sentence is shown to the participant and is not copied into
+the audit log. The audit event records the status only.
+
+## Participant page
+
+A caseworker mints a link with `POST /v1/applications/{id}/share`. The person
+the application is about opens it, sees the facts already on file (an SSN is
+masked), and answers the questions the fill could not. The page has one button,
+"Save my answers". It has no way to submit. Answers are stored as facts sourced
+`participant`, so the packet can tell a caseworker's answer from the
+participant's.
+
+To see it locally, after the quickstart:
+
+```bash
+pnpm tsx --env-file-if-exists=.env.local scripts/demo-participant.ts
+pnpm dev
+```
+
+Open the URL the script prints.
+
+## Shared planner
+
+The Chrome extension's on-device planner (field mapper, gap analyst, independent
+reviewer) and this API run the same plan. `POST /v1/plan` takes a redacted field
+inventory and the names of available sources — a `value` property is rejected —
+and returns the plan shape the extension already applies. The extension checks
+the plan again before it writes to the page. Set `navaApiBase` and `navaApiToken`
+in the extension to send planning here; otherwise it keeps using Gemini Nano on
+the caseworker's machine.
+
+`pnpm compare` scores that plan the way the product is judged: review-ready or
+not, confidently wrong fields, and a separate count when the wrong field is an
+SSN or EIN. The five models are the set from the harness comparison: Claude
+Opus 4.7, Opus 4.8, Sonnet 4.6, GPT-5.1, and GPT-5 mini. Without
+`ANTHROPIC_API_KEY` and `OPENAI_API_KEY` those rows are skipped. The script still
+checks a scripted correct plan and a scripted SSN mis-map, so the scorer is
+proven either way. Costs are September 2026 list prices and ignore cache.
+
+When `TYPESAFE_API_KEY` is set, `POST /v1/plan` asks Jev (`jev-1.13.0`) which
+controls match a source, which ones the client has to answer, and which ones
+should stay blank. That is the same split Kaylyn used on IHSS: the generative
+model only sees the controls Jev is not confident about, and a Social Security
+or EIN control is never filled from that decision. Jev's list price is $0.042
+per million input tokens, and output tokens are free. Without the key, planning
+is unchanged.
 
 ## Relationship to the Chrome extension
 

@@ -224,6 +224,7 @@ export const AUDIT_EVENT_TYPES = [
   'source_reloaded',
   'session_ended',
   'audit_exported',
+  'outcome_recorded',
 ] as const;
 
 export const auditEventTypeSchema = z.enum(AUDIT_EVENT_TYPES);
@@ -263,11 +264,56 @@ export const AUDIT_COUNT_KEYS = new Set<string>([
   'pageCount',
 ]);
 
+/**
+ * What happened after a human submitted. These are case statuses, not form
+ * statuses: the application state machine above stops at review.
+ */
+export const OUTCOME_STATUSES = [
+  'received',
+  'pending_documents',
+  'approved',
+  'denied',
+  'benefit_received',
+] as const;
+
+export const outcomeStatusSchema = z.enum(OUTCOME_STATUSES);
+export type OutcomeStatus = z.infer<typeof outcomeStatusSchema>;
+
+/**
+ * Why an outcome needs a human explanation. A code, never a free-text dump of
+ * the denial letter, so the audit trail can name the reason without storing
+ * whatever a county pasted into it.
+ */
+export const OUTCOME_REASON_CODES = [
+  'missing_documents',
+  'ineligible_income',
+  'ineligible_residency',
+  'ineligible_household',
+  'duplicate_application',
+  'withdrawn',
+  'identity_not_verified',
+  'other',
+] as const;
+
+export const outcomeReasonCodeSchema = z.enum(OUTCOME_REASON_CODES);
+export type OutcomeReasonCode = z.infer<typeof outcomeReasonCodeSchema>;
+
+/** Legal moves. `submitted` is the start state, recorded by the submit gate. */
+export const OUTCOME_TRANSITIONS: Record<'submitted' | OutcomeStatus, readonly OutcomeStatus[]> = {
+  submitted: ['received', 'pending_documents', 'approved', 'denied'],
+  received: ['pending_documents', 'approved', 'denied'],
+  pending_documents: ['received', 'approved', 'denied'],
+  approved: ['pending_documents', 'benefit_received'],
+  denied: [],
+  benefit_received: [],
+};
+
 export const AUDIT_ENUM_KEYS = {
   checkpointKind: new Set<string>(CHECKPOINT_KINDS),
   resumeOutcome: new Set<string>(RESUME_OUTCOMES),
   fromStatus: new Set<string>(APPLICATION_STATUSES),
   toStatus: new Set<string>(APPLICATION_STATUSES),
+  outcomeStatus: new Set<string>(OUTCOME_STATUSES),
 } as const;
 
 // ---------------------------------------------------------------------------

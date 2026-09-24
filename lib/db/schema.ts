@@ -7,6 +7,7 @@ import {
   GAP_KINDS,
   INPUT_TYPES,
   INTERVENTION_REASONS,
+  OUTCOME_STATUSES,
 } from '@/lib/vocabulary';
 import {
   bigserial,
@@ -52,6 +53,7 @@ export const reviewActionEnum = pgEnum('review_action', [
   'confirmed',
   'submitted',
 ]);
+export const outcomeStatusEnum = pgEnum('outcome_status', OUTCOME_STATUSES);
 
 // ---------------------------------------------------------------------------
 // Tenancy
@@ -386,6 +388,61 @@ export const reviewEvent = pgTable(
     byApplication: index('ReviewEvent_applicationId_idx').on(table.applicationId),
   }),
 );
+
+/**
+ * Append-only post-submit history: received, waiting on documents, approved,
+ * denied, or benefit received. A correction is a new row. `followUp` is shown
+ * to the participant and is never copied onto the audit trail.
+ */
+export const applicationOutcome = pgTable(
+  'ApplicationOutcome',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenantId')
+      .notNull()
+      .references(() => tenant.id, { onDelete: 'cascade' }),
+    applicationId: uuid('applicationId')
+      .notNull()
+      .references(() => application.id, { onDelete: 'cascade' }),
+    status: outcomeStatusEnum('status').notNull(),
+    reasonCode: text('reasonCode'),
+    followUp: text('followUp'),
+    recordedBy: text('recordedBy').notNull(),
+    recordedAt: timestamp('recordedAt', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    byApplication: index('ApplicationOutcome_applicationId_recordedAt_idx').on(
+      table.applicationId,
+      table.recordedAt,
+    ),
+  }),
+);
+
+/**
+ * A participant link for one application.
+ *
+ * Like `ApiKey`, this table has no row-level security: the token is presented
+ * before a tenant is known. It stores a hash of the token, never the token,
+ * and no participant values. Resolving it yields a tenant id; everything after
+ * that goes through `withTenant`.
+ */
+export const participantShare = pgTable('ParticipantShare', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenantId')
+    .notNull()
+    .references(() => tenant.id, { onDelete: 'cascade' }),
+  applicationId: uuid('applicationId')
+    .notNull()
+    .references(() => application.id, { onDelete: 'cascade' }),
+  householdId: uuid('householdId')
+    .notNull()
+    .references(() => household.id, { onDelete: 'cascade' }),
+  tokenHash: text('tokenHash').notNull().unique(),
+  createdBy: text('createdBy').notNull(),
+  createdAt: timestamp('createdAt', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expiresAt', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revokedAt', { withTimezone: true }),
+});
 
 /**
  * Append-only audit trail, exported as `nava.form-filling.audit.v1`.
