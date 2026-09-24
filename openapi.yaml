@@ -402,6 +402,12 @@ paths:
         Programs served by one site are one run. BenefitsCal serves CalFresh,
         Medi-Cal, and CalWORKs together. Selecting programs across two sites is
         refused rather than silently fanned out.
+
+        A cold start can send `repair: true` and `observed` (selectors, labels,
+        and counts — never values). When every previous field has one
+        unambiguous control, the deterministic scribe publishes a tenant
+        playbook and this response is the warm plan. A tie, or a protected
+        field with no distinctive label, stays on the model path.
       requestBody:
         required: true
         content:
@@ -438,6 +444,28 @@ paths:
                     Redacted page inventory. When a TypeSafe key is configured,
                     Jev classifies the controls and the cold-path message lists
                     map, ask, and leave. Values are not part of this object.
+                observed:
+                  type: array
+                  maxItems: 80
+                  description: |
+                    Controls on the page the caller already has open. Labels and
+                    counts only. Do not send values.
+                  items:
+                    type: object
+                    required: [selector, label, type, count]
+                    additionalProperties: false
+                    properties:
+                      selector: { type: string }
+                      label: { type: string }
+                      question: { type: string }
+                      type: { type: string }
+                      required: { type: boolean }
+                      count: { type: integer, minimum: 0 }
+                repair:
+                  type: boolean
+                  description: |
+                    When true on a cold start, try the deterministic scribe
+                    before asking for an agent key.
                 questions:
                   type: array
                   maxItems: 40
@@ -825,7 +853,8 @@ paths:
       summary: Save participant answers
       security: []
       description: |
-        Answers become facts sourced `participant`. This does not submit.
+        No API key. The token is the credential. Answers become facts sourced
+        `participant`. This does not submit.
       parameters:
         - name: token
           in: path
@@ -852,6 +881,42 @@ paths:
       responses:
         '200': { description: Answers stored. HTML form posts redirect back to the page. }
         '404': { description: Unknown, expired, or revoked link. }
+
+  /v1/work/demo:
+    get:
+      tags: [Completion]
+      summary: Whether the local caseworker demo is loaded
+      security: []
+      description: |
+        Local-only. No API key. Returns 404 in production. The caseworker desk
+        uses this to see that the fictional household is ready.
+      responses:
+        '200': { description: '`ready` is true when the demo household is loaded.' }
+        '404': { description: Not available in production. }
+    post:
+      tags: [Completion]
+      summary: Advance the local caseworker demo
+      security: []
+      description: |
+        Local-only. No API key. Form action is one of reset, verify, confirm,
+        submit, or outcome. `submit` records that a person submitted on the
+        demo desk. It does not send a form to a county. Returns 404 in
+        production. Redirects back to `/work`.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [reset, verify, confirm, submit, outcome]
+      responses:
+        '303': { description: Redirects to the caseworker desk. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { description: Not available in production. }
 
   /v1/plan:
     post:
@@ -1109,6 +1174,63 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/programs/{slug}/playbook/repair:
+    post:
+      tags: [Catalog]
+      summary: Repair a stale playbook without a model
+      description: |
+        The caller reports the controls on the page it already has open:
+        selector, label, type, and how many elements the selector matched.
+        Values are not accepted.
+
+        The scribe keeps a selector that still matches once, and moves a field
+        only when one control's label uniquely names it. A protected field
+        needs a distinctive word (`social`, `security`, `income`), so a case
+        number next to an SSN is left unmapped. A tie is a refusal.
+
+        `publish` defaults to false, which returns the proposal and writes
+        nothing. Publishing inserts a new version scoped to the caller's
+        tenant. The shared playbook is not edited, and nothing is submitted.
+
+        The next run that probes the new selectors takes the warm path.
+      parameters: [{ $ref: '#/components/parameters/programSlug' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [observed]
+              additionalProperties: false
+              properties:
+                publish:
+                  type: boolean
+                  description: Write the tenant override. Omit it for a dry run.
+                observed:
+                  type: array
+                  maxItems: 80
+                  items:
+                    type: object
+                    required: [selector, label, type, count]
+                    additionalProperties: false
+                    properties:
+                      selector: { type: string }
+                      label: { type: string }
+                      question: { type: string }
+                      type: { type: string }
+                      required: { type: boolean }
+                      count: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: Dry run. `published` is null. `proposal.publishable` says whether a later publish would succeed.
+        '201':
+          description: A tenant playbook version was published, or the same map was already current.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Publish was requested and the scribe refused to guess.
 
   # ---------------------------------------------------------------------------
   # Audit

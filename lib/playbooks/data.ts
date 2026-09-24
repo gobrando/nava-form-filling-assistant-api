@@ -94,3 +94,30 @@ export const SEED_PLAYBOOKS: PlaybookSeed[] = [
     note: 'Single inline form with a CAPTCHA gate. The caseworker clears the gate and submits.',
   },
 ];
+
+/** The seeded WIC playbook, with the fields the scribe rehearsal reads. */
+export function wicSeedPlaybook() {
+  const seed = SEED_PLAYBOOKS.find((item) => item.programIds?.includes('wic'));
+  if (
+    !seed?.programIds ||
+    !seed.fieldMap ||
+    !seed.probes ||
+    !seed.domain ||
+    !seed.name ||
+    seed.version === undefined ||
+    seed.autoAdvance === undefined
+  ) {
+    throw new Error('The WIC seed playbook is missing.');
+  }
+  return {
+    domain: seed.domain,
+    name: seed.name,
+    programIds: seed.programIds,
+    version: seed.version,
+    probes: seed.probes,
+    fieldMap: seed.fieldMap,
+    safeAdvanceRules: seed.safeAdvanceRules ?? [],
+    autoAdvance: seed.autoAdvance,
+    note: seed.note ?? null,
+  };
+}

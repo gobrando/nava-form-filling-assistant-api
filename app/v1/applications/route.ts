@@ -11,6 +11,7 @@ import { briefForAgent, conservativeDecisions, hintedDecisions } from '@/lib/pla
 import { decideFields, estimateJevCostUsd, jevKey } from '@/lib/planner/jev';
 import { allowedPurposeSet } from '@/lib/planner/run';
 import { evaluateProbes, resolvePlaybookForProgram } from '@/lib/playbooks/registry';
+import { observedControlSchema, proposeRepair, publishRepair } from '@/lib/playbooks/scribe';
 import { inputTypeSchema, planWorkflows } from '@/lib/vocabulary';
 import { desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -78,6 +79,14 @@ const postSchema = z
       })
       .strict()
       .optional(),
+    /**
+     * Redacted controls from the page the caller already has open. With
+     * `repair: true` on a cold start, the deterministic scribe may publish a
+     * tenant playbook and return a warm plan instead of asking for a model.
+     * A `value` property is rejected.
+     */
+    observed: z.array(observedControlSchema).max(80).optional(),
+    repair: z.boolean().optional(),
     /** Questions the client still has to answer. Stored as gaps, then shareable. */
     questions: z
       .array(
@@ -175,6 +184,37 @@ export async function POST(request: Request) {
               : 'No playbook for this site.',
           };
 
+    let activePlaybook = playbook;
+    let activeVerdict = verdict;
+    let repairSummary: ReturnType<typeof proposeRepair> | null = null;
+
+    // A cold start can still avoid a model when the caller shows the page and
+    // every previous field has one unambiguous control. The shared playbook
+    // stays put; the override is this tenant's. This happens before the
+    // application row is written so the audit records the path that ran.
+    if (!verdict.passed && body.repair && body.observed && playbook) {
+      const proposal = proposeRepair(playbook, body.observed);
+      repairSummary = proposal;
+      if (proposal.publishable) {
+        const published = await publishRepair(
+          tx,
+          auth.tenantId,
+          auth.principalId,
+          playbook,
+          proposal,
+        );
+        const probeResults = proposal.probes.map((selector) => ({
+          selector,
+          count: body.observed?.find((control) => control.selector === selector)?.count ?? 0,
+        }));
+        const repaired = evaluateProbes(published.row, probeResults);
+        if (repaired.passed) {
+          activePlaybook = published.row;
+          activeVerdict = repaired;
+        }
+      }
+    }
+
     const [row] = await tx
       .insert(application)
       .values({
@@ -184,9 +224,9 @@ export async function POST(request: Request) {
         workflowId: workflow.workflowId,
         name: workflow.name,
         status: 'ready_to_fill',
-        playbookId: playbook?.id ?? null,
-        playbookVersion: playbook?.version ?? null,
-        executionMode: verdict.executionMode,
+        playbookId: activePlaybook?.id ?? null,
+        playbookVersion: activePlaybook?.version ?? null,
+        executionMode: activeVerdict.executionMode,
         location: workflow.url,
         ownerPrincipal: auth.principalId,
       })
@@ -197,7 +237,7 @@ export async function POST(request: Request) {
       type: 'application_added',
       principalId: auth.principalId,
       applicationId: row.id,
-      outcome: verdict.executionMode,
+      outcome: activeVerdict.executionMode,
     });
 
     if (body.questions?.length) {
@@ -205,9 +245,9 @@ export async function POST(request: Request) {
     }
 
     // --- Warm path: deterministic, no model ---------------------------------
-    if (verdict.passed && playbook) {
+    if (activeVerdict.passed && activePlaybook) {
       const facts = await currentFacts(tx, body.householdId);
-      const plan = buildFillPlan(playbook, facts);
+      const plan = buildFillPlan(activePlaybook, facts);
       await persistPlan(tx, auth.tenantId, row.id, plan);
 
       await recordAudit(tx, {
@@ -261,7 +301,20 @@ export async function POST(request: Request) {
           },
           started: false,
           reason: verdict.reason,
-          next: 'This site needs the agent. Retry with agentApiKey to start it.',
+          next: repairSummary?.publishable
+            ? 'The repair did not clear the freshness check. Retry with agentApiKey to start the agent.'
+            : repairSummary
+              ? 'The deterministic scribe refused to guess. Retry with agentApiKey, or send a clearer observation to POST /v1/programs/{slug}/playbook/repair.'
+              : 'This site needs the agent. Retry with agentApiKey to start it, or with repair and an observation of the page.',
+          repair: repairSummary
+            ? {
+                publishable: repairSummary.publishable,
+                refused: repairSummary.refused,
+                unresolved: repairSummary.unresolved.length,
+                moved: repairSummary.moved.length,
+                kept: repairSummary.kept.length,
+              }
+            : null,
           jev: jevSummary,
           brief: jevBrief || null,
         },
@@ -277,6 +330,9 @@ export async function POST(request: Request) {
         playbook
           ? `A playbook exists at version ${playbook.version} but is not fresh. Confirm its field map rather than rebuilding it, and note which selectors moved.`
           : 'There is no playbook for this site. Survey it, then have the scribe write one.',
+        repairSummary && !repairSummary.publishable
+          ? `The deterministic scribe already refused this observation: ${repairSummary.refused} Do not guess those fields.`
+          : '',
         jevBrief,
       ]
         .filter(Boolean)

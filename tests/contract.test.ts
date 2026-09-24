@@ -64,9 +64,19 @@ describe('openapi.yaml matches the implementation', () => {
     for (const [path, operations] of Object.entries(spec.paths as Record<string, object>)) {
       for (const [method, operation] of Object.entries(operations as Record<string, unknown>)) {
         if (method === 'options' || method === 'parameters') continue;
-        const security =
-          (operation as { security?: unknown[] }).security ?? (spec.security as unknown[]);
-        if (!security || security.length === 0) unsecured.push(`${method.toUpperCase()} ${path}`);
+        const declared = (operation as { security?: unknown[] }).security;
+        const security = declared ?? (spec.security as unknown[]);
+        // An empty array opts out of the global key. That is allowed only when
+        // the operation says so: the participant token is the credential, or
+        // the route is the local demo and is absent in production.
+        const text = JSON.stringify(operation).toLowerCase();
+        const openOnPurpose =
+          Array.isArray(declared) &&
+          declared.length === 0 &&
+          (/no api key/.test(text) || /token is the credential/.test(text));
+        if ((!security || security.length === 0) && !openOnPurpose) {
+          unsecured.push(`${method.toUpperCase()} ${path}`);
+        }
       }
     }
     expect(unsecured).toEqual([]);

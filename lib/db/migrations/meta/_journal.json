@@ -29,6 +29,13 @@
       "when": 1790280000000,
       "tag": "0003_outcomes_and_participant",
       "breakpoints": false
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790300000000,
+      "tag": "0004_playbook_repaired",
+      "breakpoints": false
     }
   ]
 }
