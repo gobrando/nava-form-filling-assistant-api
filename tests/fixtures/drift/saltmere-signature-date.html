@@ -1,0 +1,45 @@
+<!doctype html>
+<!--
+  Saltmere County medical renewal.
+
+  Language, street, ZIP, and Social Security Number still use the
+  BenefitsCal selectors. The date-of-birth control is gone. The only date
+  left is Signature date, and that must not become the birth date. The
+  served IHSS playbook has no date of birth; this page is scored against
+  BenefitsCal, which does.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Saltmere County medical renewal</title>
+  </head>
+  <body>
+    <h1>Renew medical coverage — Saltmere County</h1>
+    <p>
+      Sign and date the renewal. The birth date is already on the case,
+      and this page asks only for the date you sign.
+    </p>
+    <form id="medical-renewal">
+      <label for="primarylang">Primary language</label>
+      <select id="primarylang" name="language">
+        <option value="">- Select -</option>
+        <option>English</option>
+        <option>Spanish</option>
+      </select>
+
+      <label for="addressLine1">Street address</label>
+      <input id="addressLine1" name="address" type="text" required />
+
+      <label for="zip5">ZIP code</label>
+      <input id="zip5" name="zip" type="text" required />
+
+      <label for="ssn">Social Security Number</label>
+      <input id="ssn" name="ssn" type="text" required />
+
+      <label for="signed-on">Signature date</label>
+      <input id="signed-on" name="signed_on" type="date" required />
+
+      <button id="submit-renewal" type="submit">Submit renewal</button>
+    </form>
+  </body>
+</html>

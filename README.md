@@ -353,6 +353,15 @@ That runs the drifted WIC fixture and an SSN-versus-case-number check with no
 database and no model. The ZIP field on that fixture still truncates, so a
 repaired playbook does not skip readback.
 
+### Drift lab
+
+`pnpm drift` scores fictional county pages in `tests/fixtures/drift/` with that
+same scribe, plus the rehearsal fixture above. No API key and no database. It
+prints a scorecard and writes
+[`reports/scribe-drift.md`](reports/scribe-drift.md): which drifts publish,
+which refusals still belong to the model scribe, and what a green row does not
+prove (readback, no submit, all-or-nothing publish).
+
 ## What is and isn't proven
 
 | | Status |

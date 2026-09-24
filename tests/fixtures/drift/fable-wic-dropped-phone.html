@@ -1,0 +1,48 @@
+<!doctype html>
+<!--
+  Fable County WIC. The phone field was removed and nothing else on the
+  page is labeled as a phone. One missing field blocks publish of the
+  fields that remain.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fable County WIC application</title>
+  </head>
+  <body>
+    <h1>Apply for WIC in Fable County</h1>
+    <p>
+      The clinic will call from the number already on the household
+      record. This year's form does not ask for a phone.
+    </p>
+    <form id="wic-application">
+      <label for="edit-name">Name</label>
+      <input id="edit-name" name="name" type="text" required />
+
+      <label for="edit-email">Email</label>
+      <input id="edit-email" name="email" type="email" />
+
+      <label for="edit-zip-code">Zip code</label>
+      <input id="edit-zip-code" name="zip_code" type="text" maxlength="5" />
+
+      <label for="edit-preferred-language">Preferred language</label>
+      <select id="edit-preferred-language" name="preferred_language">
+        <option value="">- Select -</option>
+        <option>English</option>
+        <option>Spanish</option>
+      </select>
+
+      <label for="edit-please-choose-the-wic-clinic-closest-to-you">
+        Please choose the WIC clinic closest to you
+      </label>
+      <select id="edit-please-choose-the-wic-clinic-closest-to-you" name="clinic" required>
+        <option value="">- Select -</option>
+        <option>Fable County WIC</option>
+        <option>West Ridge WIC</option>
+      </select>
+
+      <div id="captcha-gate">Verify you are human</div>
+      <button id="edit-submit" type="submit">Submit</button>
+    </form>
+  </body>
+</html>

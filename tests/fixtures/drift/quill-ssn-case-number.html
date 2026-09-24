@@ -1,0 +1,43 @@
+<!doctype html>
+<!--
+  Quill County benefits application.
+
+  The Social Security Number selector is gone. The only nearby identifier
+  is Case number. That must stay unresolved, and the whole repair must
+  be refused, even though the other selectors still match.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Quill County benefits application</title>
+  </head>
+  <body>
+    <h1>Apply for benefits — Quill County</h1>
+    <p>
+      Food assistance and medical coverage. The county file opens with a
+      case number. This page does not ask for a Social Security Number.
+    </p>
+    <form id="benefits-application">
+      <label for="primarylang">Primary language</label>
+      <select id="primarylang" name="language">
+        <option value="">- Select -</option>
+        <option>English</option>
+        <option>Spanish</option>
+      </select>
+
+      <label for="addressLine1">Street address</label>
+      <input id="addressLine1" name="address" type="text" required />
+
+      <label for="zip5">ZIP code</label>
+      <input id="zip5" name="zip" type="text" required />
+
+      <label for="birthDate_primary_input">Date of birth</label>
+      <input id="birthDate_primary_input" name="birth_date" type="date" required />
+
+      <label for="case-number">Case number</label>
+      <input id="case-number" name="case_number" type="text" required />
+
+      <button id="submit-application" type="submit">Submit</button>
+    </form>
+  </body>
+</html>
