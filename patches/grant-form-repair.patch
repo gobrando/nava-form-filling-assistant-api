@@ -1,0 +1,1501 @@
+diff --git a/README.md b/README.md
+index b13a89d..b37f570 100644
+--- a/README.md
++++ b/README.md
+@@ -115,6 +115,18 @@ Open `http://127.0.0.1:8765/` to use the synthetic portal. Its final submit hand
+ 
+ The current suite covers profile validation, ranking order, explicit ineligibility, work-plan data isolation, human-only submission policy, and structured API-label normalization. The recorded browser scenario fills sourced values, preserves an unknown UEI, saves a draft, and leaves certification unchecked.
+ 
++## Repair drifted field ids
++
++Portal ids change more often than the questions. The repair command places the playbook field map onto observed controls — selector, label, type, and count — and prints a proposal. It does not read typed values, call a model, rewrite the playbook, or submit the form.
++
++```bash
++./bin/grant-filler repair-fields \
++  skills/agentic-grant-application/playbooks/demo.local.md \
++  fixtures/field-repair/renamed-ids.json
++```
++
++A selector that still matches one control is kept. A field moves only when one label uniquely names it. EIN, SSN, bank account, and award amount move only onto a label that clearly names that field, never onto project id, case number, or reference number. Two controls with the same label are a tie, and any unresolved field blocks the proposal. The JSON field `publishable` says whether the returned map is safe to keep; the command does not write it.
++
+ ## Repository map
+ 
+ ```text
+@@ -123,6 +135,7 @@ demo/                                 Animated-demo source
+ docs/                                 Architecture, principles, validation, and roadmap
+ examples/                             Synthetic profile, opportunities, and work plan
+ fixtures/demo-portal/                 Local grant-form fixture
++fixtures/field-repair/                Drift observations for field-map repair
+ skills/agentic-grant-application/     Portable agent skill and deterministic helper
+ tests/                                Regression tests
+ ```
+diff --git a/fixtures/field-repair/bank-account-reference.json b/fixtures/field-repair/bank-account-reference.json
+new file mode 100644
+index 0000000..58ff73a
+--- /dev/null
++++ b/fixtures/field-repair/bank-account-reference.json
+@@ -0,0 +1,33 @@
++{
++  "description": "A bank account whose only nearby label is reference number.",
++  "previous": {
++    "domain": "demo.local",
++    "version": 1,
++    "name": "Bank account drift",
++    "probes": [
++      {
++        "selector": "#bank-account",
++        "label": "Bank account number",
++        "type": "text"
++      }
++    ],
++    "field_map": [
++      {
++        "selector": "#bank-account",
++        "purpose": "bank_account",
++        "label": "Bank account number",
++        "type": "text",
++        "required": true
++      }
++    ],
++    "never_submit": ["#submit-application"]
++  },
++  "controls": [
++    {
++      "selector": "#reference-number",
++      "label": "Reference number",
++      "type": "text",
++      "count": 1
++    }
++  ]
++}
+diff --git a/fixtures/field-repair/dropped-field.json b/fixtures/field-repair/dropped-field.json
+new file mode 100644
+index 0000000..a85cf87
+--- /dev/null
++++ b/fixtures/field-repair/dropped-field.json
+@@ -0,0 +1,53 @@
++{
++  "description": "Project abstract was removed. One dropped field blocks the proposal.",
++  "controls": [
++    {
++      "selector": "#org-legal-name",
++      "label": "Organization legal name",
++      "type": "text",
++      "count": 1
++    },
++    {
++      "selector": "#uei-gate",
++      "label": "Does the organization have a Unique Entity ID (UEI)?",
++      "type": "radio",
++      "count": 1
++    },
++    {
++      "selector": "#entity-uei",
++      "label": "Unique Entity ID",
++      "type": "text",
++      "count": 1
++    },
++    {
++      "selector": "#proposal-title",
++      "label": "Project title",
++      "type": "text",
++      "count": 1
++    },
++    {
++      "selector": "#federal-request",
++      "label": "Federal amount requested",
++      "type": "number",
++      "count": 1
++    },
++    {
++      "selector": "#director-name",
++      "label": "Project director",
++      "type": "text",
++      "count": 1
++    },
++    {
++      "selector": "#save-draft-btn",
++      "label": "Save draft",
++      "type": "button",
++      "count": 1
++    },
++    {
++      "selector": "#reference-number",
++      "label": "Reference number",
++      "type": "text",
++      "count": 1
++    }
++  ]
++}
+diff --git a/fixtures/field-repair/renamed-ids.json b/fixtures/field-repair/renamed-ids.json
+new file mode 100644
+index 0000000..3b2a2cc
+--- /dev/null
++++ b/fixtures/field-repair/renamed-ids.json
+@@ -0,0 +1,65 @@
++{
++  "description": "Portal ids were renamed. Each previous label still names one control.",
++  "controls": [
++    {
++      "selector": "#org-legal-name",
++      "label": "Organization legal name",
++      "type": "text",
++      "count": 1
++    },
++    {
++      "selector": "#uei-gate",
++      "label": "Does the organization have a Unique Entity ID (UEI)?",
++      "type": "radio",
++      "count": 1
++    },
++    {
++      "selector": "#entity-uei",
++      "label": "Unique Entity ID",
++      "type": "text",
++      "count": 1
++    },
++    {
++      "selector": "#proposal-title",
++      "label": "Project title",
++      "type": "text",
++      "count": 1
++    },
++    {
++      "selector": "#proposal-abstract",
++      "label": "Project abstract",
++      "type": "textarea",
++      "count": 1
++    },
++    {
++      "selector": "#federal-request",
++      "label": "Federal amount requested",
++      "type": "number",
++      "count": 1
++    },
++    {
++      "selector": "#director-name",
++      "label": "Project director",
++      "type": "text",
++      "count": 1
++    },
++    {
++      "selector": "#save-draft-btn",
++      "label": "Save draft",
++      "type": "button",
++      "count": 1
++    },
++    {
++      "selector": "#reference-number",
++      "label": "Reference number",
++      "type": "text",
++      "count": 1
++    },
++    {
++      "selector": "#submit-application",
++      "label": "Sign and submit",
++      "type": "submit",
++      "count": 1
++    }
++  ]
++}
+diff --git a/fixtures/field-repair/tie.json b/fixtures/field-repair/tie.json
+new file mode 100644
+index 0000000..0325305
+--- /dev/null
++++ b/fixtures/field-repair/tie.json
+@@ -0,0 +1,65 @@
++{
++  "description": "Two controls share the Project title label. That tie blocks the proposal.",
++  "controls": [
++    {
++      "selector": "#org-legal-name",
++      "label": "Organization legal name",
++      "type": "text",
++      "count": 1
++    },
++    {
++      "selector": "#uei-gate",
++      "label": "Does the organization have a Unique Entity ID (UEI)?",
++      "type": "radio",
++      "count": 1
++    },
++    {
++      "selector": "#entity-uei",
++      "label": "Unique Entity ID",
++      "type": "text",
++      "count": 1
++    },
++    {
++      "selector": "#title-a",
++      "label": "Project title",
++      "type": "text",
++      "count": 1
++    },
++    {
++      "selector": "#title-b",
++      "label": "Project title",
++      "type": "text",
++      "count": 1
++    },
++    {
++      "selector": "#proposal-abstract",
++      "label": "Project abstract",
++      "type": "textarea",
++      "count": 1
++    },
++    {
++      "selector": "#federal-request",
++      "label": "Federal amount requested",
++      "type": "number",
++      "count": 1
++    },
++    {
++      "selector": "#director-name",
++      "label": "Project director",
++      "type": "text",
++      "count": 1
++    },
++    {
++      "selector": "#save-draft-btn",
++      "label": "Save draft",
++      "type": "button",
++      "count": 1
++    },
++    {
++      "selector": "#reference-number",
++      "label": "Reference number",
++      "type": "text",
++      "count": 1
++    }
++  ]
++}
+diff --git a/skills/agentic-grant-application/playbooks/demo.local.md b/skills/agentic-grant-application/playbooks/demo.local.md
+index c964328..a2e2a3a 100644
+--- a/skills/agentic-grant-application/playbooks/demo.local.md
++++ b/skills/agentic-grant-application/playbooks/demo.local.md
+@@ -4,7 +4,7 @@ This playbook is for the local synthetic form in `fixtures/demo-portal/index.htm
+ 
+ ## Freshness probe
+ 
+-The page is fresh when `#organization-name`, `#project-title`, and `#save-draft` each exist once.
++The page is fresh when `#organization-name`, `#project-title`, and `#save-draft` each exist once. The field map below is the copy `repair-fields` reads.
+ 
+ ## Path
+ 
+@@ -21,3 +21,72 @@ The `has_uei` radio group controls `#uei`. When the answer is `Yes`, the UEI fie
+ Use the visible field labels. Fill organization and project fields, then read every value back. The requested amount must be a non-negative integer. The abstract has a 500-character limit.
+ 
+ `#save-draft` saves to browser local storage and shows `Draft saved`. It is safe for the agent to click. `#submit-application` is the final action and must not be clicked.
++
++## Field map
++
++Deterministic repair reads this block. A dry run returns a proposal and does not rewrite this file. `ein`, `ssn`, `bank_account`, and `award_amount` move only onto a label that clearly names them, never onto project id, case number, or reference number. Repair never submits.
++
++```json
++{
++  "domain": "demo.local",
++  "version": 1,
++  "name": "Demo Grant Portal",
++  "probes": [
++    {"selector": "#organization-name", "label": "Organization legal name"},
++    {"selector": "#project-title", "label": "Project title"},
++    {"selector": "#save-draft", "label": "Save draft", "type": "button"}
++  ],
++  "field_map": [
++    {
++      "selector": "#organization-name",
++      "purpose": "organization_name",
++      "label": "Organization legal name",
++      "type": "text",
++      "required": true
++    },
++    {
++      "selector": "#has-uei-yes",
++      "purpose": "has_uei",
++      "label": "Does the organization have a Unique Entity ID (UEI)?",
++      "type": "radio",
++      "required": true
++    },
++    {
++      "selector": "#uei",
++      "purpose": "uei",
++      "label": "Unique Entity ID",
++      "type": "text",
++      "required": false
++    },
++    {
++      "selector": "#project-title",
++      "purpose": "project_title",
++      "label": "Project title",
++      "type": "text",
++      "required": true
++    },
++    {
++      "selector": "#project-abstract",
++      "purpose": "project_abstract",
++      "label": "Project abstract",
++      "type": "textarea",
++      "required": true
++    },
++    {
++      "selector": "#requested-amount",
++      "purpose": "award_amount",
++      "label": "Federal amount requested",
++      "type": "number",
++      "required": true
++    },
++    {
++      "selector": "#project-director",
++      "purpose": "project_director",
++      "label": "Project director",
++      "type": "text",
++      "required": true
++    }
++  ],
++  "never_submit": ["#submit-application"]
++}
++```
+diff --git a/skills/agentic-grant-application/scripts/field_repair.py b/skills/agentic-grant-application/scripts/field_repair.py
+new file mode 100644
+index 0000000..e7f4d06
+--- /dev/null
++++ b/skills/agentic-grant-application/scripts/field_repair.py
+@@ -0,0 +1,628 @@
++#!/usr/bin/env python3
++"""Deterministic repair for a grant portal field map. No model and no values.
++
++A generic form mapper scores overlapping words and will park a bank account on
++"reference number" because both say "number", or treat "award" as enough to
++name an award amount. Grant repair does not.
++
++EIN, SSN, bank account, and award amount move only when a label clearly names
++that field. Project id, case number, and reference number are nearby
++identifiers: they can keep a field whose purpose is that identifier, and they
++never receive a protected field. Any other field also stays off those labels,
++so "project title" cannot fall through onto "project id".
++
++A selector that still matches one compatible control is kept. Anything else
++moves only when one control scores strictly above the others. A tie, a dropped
++field, or a protected field without a clear label blocks the proposal. The
++proposal is the whole result. This module does not write a playbook and it
++never submits a form.
++"""
++
++from __future__ import annotations
++
++import json
++import re
++from pathlib import Path
++from typing import Any, Mapping, Optional, Sequence, Union
++
++
++class ObservationError(ValueError):
++    """The caller passed something other than redacted controls."""
++
++
++OBSERVED_KEYS = {"selector", "label", "type", "count"}
++OBSERVATION_KEYS = {"controls", "previous", "description"}
++CARRIED_KEYS = ("purpose", "label", "type", "required", "method", "mask")
++
++# Words that show up on too many grant controls to name one.
++GENERIC_WEAK = frozenset({"number", "id", "name", "code", "type", "status", "federal", "funding"})
++
++STOP = frozenset({
++    "the", "and", "for", "with", "your", "you", "what", "this", "that", "from",
++    "does", "have", "has", "please", "are", "was", "not", "but", "can",
++})
++
++ACRONYMS = frozenset({"id", "ein", "ssn", "uei", "dba", "sam", "iban"})
++
++# Tokens that clearly name a protected grant field. "Award" is absent on
++# purpose: an award number is an identifier, not the dollars requested.
++CLEAR = {
++    "ein": frozenset({"ein", "employer", "tax"}),
++    "ssn": frozenset({"ssn", "social", "security"}),
++    "bank_account": frozenset({"bank", "routing", "iban"}),
++    "award_amount": frozenset({"amount", "requested"}),
++}
++
++# What a generic overlap mapper would treat as the same field. Protected
++# placement ignores these unless a CLEAR token is also present.
++SENSITIVE_WEAK = {
++    "ein": frozenset({"identification", "number", "id"}),
++    "ssn": frozenset({"number", "id"}),
++    "bank_account": frozenset({"account", "number", "id"}),
++    "award_amount": frozenset({"award", "number", "id", "federal", "funding"}),
++}
++
++PROTECTED = frozenset(CLEAR)
++
++PURPOSE_ALIASES = {
++    "ein": "ein",
++    "ssn": "ssn",
++    "socialsecuritynumber": "ssn",
++    "bankaccount": "bank_account",
++    "bankaccountnumber": "bank_account",
++    "awardamount": "award_amount",
++    "requestedamount": "award_amount",
++    "federalamountrequested": "award_amount",
++}
++
++IDENTIFIER_FIELDS = {
++    "project id": "project_id",
++    "case number": "case_number",
++    "reference number": "reference_number",
++}
++
++NEARBY_IDENTIFIER_RE = re.compile(
++    r"\b(?:project\s+id|case\s+number|reference\s+number)\b",
++    re.IGNORECASE,
++)
++SUBMIT_RE = re.compile(r"submit|certif|captcha|signature|password|\bsign\b", re.IGNORECASE)
++FIELD_MAP_RE = re.compile(
++    r"^## Field map\b.*?```json\n(.*?)\n```",
++    re.MULTILINE | re.DOTALL,
++)
++CAMEL_RE = re.compile(r"([a-z])([A-Z])")
++
++TEXTISH = frozenset({"text", "textarea", "number", "email", "tel"})
++CHOICES = frozenset({"radio", "select"})
++
++
++def canonical_purpose(purpose: Optional[str]) -> Optional[str]:
++    if not purpose:
++        return None
++    compact = re.sub(r"[^a-z0-9]", "", purpose.lower())
++    return PURPOSE_ALIASES.get(compact, purpose)
++
++
++def is_protected(purpose: Optional[str]) -> bool:
++    return canonical_purpose(purpose) in PROTECTED
++
++
++def tokenize(value: str) -> set[str]:
++    words = re.findall(r"[a-z0-9]+", value.lower())
++    return {
++        word
++        for word in words
++        if word in ACRONYMS or (len(word) >= 3 and word not in STOP)
++    }
++
++
++def nearby_identifier(label: str) -> bool:
++    return NEARBY_IDENTIFIER_RE.search(label or "") is not None
++
++
++def normalize_label(value: str) -> str:
++    return re.sub(r"\s+", " ", value or "").strip().casefold()
++
++
++def purpose_words(purpose: Optional[str]) -> str:
++    if not purpose:
++        return ""
++    spaced = purpose.replace("_", " ")
++    return CAMEL_RE.sub(r"\1 \2", spaced)
++
++
++def entry_words(entry: Mapping[str, Any]) -> tuple[set[str], set[str]]:
++    """Distinctive tokens, then generic ones a careless mapper would still score."""
++    purpose = canonical_purpose(entry.get("purpose"))
++    tokens = tokenize(f"{entry.get('label') or ''} {purpose_words(purpose)}")
++    if purpose in CLEAR:
++        strong = set(CLEAR[purpose])
++        weak = (set(SENSITIVE_WEAK[purpose]) | (tokens & GENERIC_WEAK)) - strong
++        return strong, weak
++    strong = {token for token in tokens if token not in GENERIC_WEAK}
++    weak = {token for token in tokens if token in GENERIC_WEAK}
++    return strong, weak
++
++
++def _identifier_named(entry: Mapping[str, Any], label: str) -> bool:
++    """True when this field is the identifier the label is announcing."""
++    match = NEARBY_IDENTIFIER_RE.search(label or "")
++    if not match:
++        return False
++    expected = IDENTIFIER_FIELDS[normalize_label(match.group(0))]
++    purpose = canonical_purpose(entry.get("purpose")) or ""
++    compact = re.sub(r"[^a-z0-9]", "", purpose.lower())
++    return compact == expected.replace("_", "")
++
++
++def normalize_type(value: str) -> str:
++    lowered = (value or "text").lower()
++    if lowered in {"email", "tel"}:
++        return "text"
++    if lowered == "select-one":
++        return "select"
++    return lowered
++
++
++def types_compatible(left: str, right: str) -> bool:
++    first = normalize_type(left)
++    second = normalize_type(right)
++    if first == second:
++        return True
++    if first in TEXTISH and second in TEXTISH:
++        return True
++    return first in CHOICES and second in CHOICES
++
++
++def is_blocked(control: Mapping[str, Any], never_submit: set[str]) -> bool:
++    if control["selector"] in never_submit:
++        return True
++    if normalize_type(str(control.get("type") or "")) in {"submit", "password"}:
++        return True
++    text = f"{control.get('selector', '')} {control.get('label', '')} {control.get('type', '')}"
++    return SUBMIT_RE.search(text) is not None
++
++
++def _require_text(item: Mapping[str, Any], key: str, where: str) -> str:
++    value = item.get(key)
++    if not isinstance(value, str) or not value.strip():
++        raise ObservationError(f"{where} needs a {key}")
++    return value.strip()
++
++
++def parse_controls(raw: Any) -> list[dict[str, Any]]:
++    if not isinstance(raw, list):
++        raise ObservationError("controls must be a list")
++    parsed: list[dict[str, Any]] = []
++    seen: set[str] = set()
++    for index, item in enumerate(raw):
++        where = f"controls[{index}]"
++        if not isinstance(item, dict):
++            raise ObservationError(f"{where} must be an object")
++        if "value" in item:
++            raise ObservationError("observed controls must not include a value")
++        extra = set(item) - OBSERVED_KEYS
++        if extra:
++            names = ", ".join(sorted(extra))
++            raise ObservationError(f"{where} has unexpected fields: {names}")
++        selector = _require_text(item, "selector", where)
++        if selector in seen:
++            raise ObservationError(f"duplicate selector {selector}")
++        seen.add(selector)
++        label = item.get("label")
++        control_type = item.get("type")
++        count = item.get("count")
++        if not isinstance(label, str):
++            raise ObservationError(f"{where} needs a label")
++        if not isinstance(control_type, str) or not control_type.strip():
++            raise ObservationError(f"{where} needs a type")
++        if type(count) is not int or isinstance(count, bool) or count < 0 or count > 50:
++            raise ObservationError(f"{where} count must be an integer from 0 to 50")
++        parsed.append({
++            "selector": selector,
++            "label": label.strip(),
++            "type": control_type.strip(),
++            "count": count,
++        })
++    return parsed
++
++
++def _reject_values(entry: Mapping[str, Any], where: str) -> None:
++    if "value" in entry:
++        raise ObservationError(f"{where} must not include a value")
++
++
++def parse_previous(raw: Mapping[str, Any]) -> dict[str, Any]:
++    if "value" in raw:
++        raise ObservationError("a field map must not include a value")
++    field_map = raw.get("field_map")
++    if not isinstance(field_map, list) or not field_map:
++        raise ObservationError("previous field map needs field_map")
++    entries: list[dict[str, Any]] = []
++    for index, entry in enumerate(field_map):
++        where = f"field_map[{index}]"
++        if not isinstance(entry, dict):
++            raise ObservationError(f"{where} must be an object")
++        _reject_values(entry, where)
++        selector = _require_text(entry, "selector", where)
++        label = entry.get("label")
++        control_type = entry.get("type")
++        if not isinstance(label, str) or not label.strip():
++            raise ObservationError(f"{where} needs a label")
++        if not isinstance(control_type, str) or not control_type.strip():
++            raise ObservationError(f"{where} needs a type")
++        cleaned = {
++            "selector": selector,
++            "label": label.strip(),
++            "type": control_type.strip(),
++            "purpose": entry.get("purpose"),
++            "required": bool(entry.get("required")),
++        }
++        for key in ("method", "mask"):
++            if isinstance(entry.get(key), str) and entry[key].strip():
++                cleaned[key] = entry[key].strip()
++        entries.append(cleaned)
++    probes = []
++    for probe in raw.get("probes") or []:
++        if isinstance(probe, str) and probe.strip():
++            probes.append({"selector": probe.strip(), "label": "", "type": ""})
++        elif isinstance(probe, dict) and isinstance(probe.get("selector"), str):
++            _reject_values(probe, "probe")
++            probes.append({
++                "selector": probe["selector"].strip(),
++                "label": str(probe.get("label") or "").strip(),
++                "type": str(probe.get("type") or "").strip(),
++            })
++    never = raw.get("never_submit") or []
++    if not isinstance(never, list) or not all(isinstance(item, str) for item in never):
++        raise ObservationError("never_submit must be a list of selectors")
++    return {
++        "domain": raw.get("domain"),
++        "version": raw.get("version"),
++        "name": raw.get("name"),
++        "probes": probes,
++        "field_map": entries,
++        "never_submit": list(never),
++    }
++
++
++def load_playbook(path: Union[str, Path]) -> dict[str, Any]:
++    text = Path(path).read_text(encoding="utf-8")
++    match = FIELD_MAP_RE.search(text)
++    if not match:
++        raise ObservationError(f"No field map JSON under '## Field map' in {path}")
++    try:
++        payload = json.loads(match.group(1))
++    except json.JSONDecodeError as exc:
++        raise ObservationError(f"Field map JSON could not be parsed: {exc}") from exc
++    if not isinstance(payload, dict):
++        raise ObservationError("field map JSON must be an object")
++    return parse_previous(payload)
++
++
++def split_observation(payload: Any) -> tuple[Optional[dict[str, Any]], list[dict[str, Any]]]:
++    if isinstance(payload, list):
++        return None, parse_controls(payload)
++    if not isinstance(payload, dict):
++        raise ObservationError("observation must be a control list or an object")
++    if "value" in payload:
++        raise ObservationError("observation must not include a value")
++    extra = set(payload) - OBSERVATION_KEYS
++    if extra:
++        names = ", ".join(sorted(extra))
++        raise ObservationError(f"observation has unexpected fields: {names}")
++    if "controls" not in payload:
++        raise ObservationError("observation needs controls")
++    previous = payload.get("previous")
++    parsed_previous = None
++    if previous is not None:
++        if not isinstance(previous, dict):
++            raise ObservationError("previous must be an object")
++        parsed_previous = parse_previous(previous)
++    return parsed_previous, parse_controls(payload["controls"])
++
++
++def score_pair(entry: Mapping[str, Any], control: Mapping[str, Any]) -> int:
++    """How strongly this control's label names the previous field.
++
++    Nearby identifiers score zero unless the field is that identifier.
++    Protected fields otherwise need a clear token, never "number" or "id" alone.
++    """
++    label = str(control.get("label") or "")
++    if nearby_identifier(label) and not _identifier_named(entry, label):
++        return 0
++    strong_words, weak_words = entry_words(entry)
++    observed = tokenize(label)
++    strong = len(strong_words & observed)
++    weak = len(weak_words & observed)
++    if is_protected(entry.get("purpose")) and strong == 0:
++        return 0
++    if strong == 0:
++        return 0
++    return strong * 10 + weak
++
++
++def _is_required(entry: Mapping[str, Any]) -> bool:
++    return bool(entry.get("required")) or is_protected(entry.get("purpose"))
++
++
++def _carry(entry: Mapping[str, Any], control: Mapping[str, Any], moved: bool) -> dict[str, Any]:
++    purpose = canonical_purpose(entry.get("purpose")) if entry.get("purpose") else None
++    carried: dict[str, Any] = {
++        "selector": control["selector"],
++        "purpose": purpose,
++        "label": control["label"] if moved else entry["label"],
++        "type": control["type"] if moved else entry["type"],
++        "required": _is_required(entry),
++    }
++    for key in ("method", "mask"):
++        if entry.get(key):
++            carried[key] = entry[key]
++    return {key: carried[key] for key in ("selector",) + CARRIED_KEYS if key in carried}
++
++
++def _placement(
++    entry: Mapping[str, Any],
++    to_selector: Optional[str],
++    disposition: str,
++    reason: str,
++) -> dict[str, Any]:
++    return {
++        "purpose": canonical_purpose(entry.get("purpose")) if entry.get("purpose") else None,
++        "from_selector": entry["selector"],
++        "to_selector": to_selector,
++        "disposition": disposition,
++        "reason": reason,
++        "input_type": entry["type"],
++        "required": _is_required(entry),
++    }
++
++
++def _tie_label(controls: Sequence[Mapping[str, Any]]) -> Optional[str]:
++    groups: dict[str, list[str]] = {}
++    for control in controls:
++        groups.setdefault(normalize_label(control["label"]), []).append(control["label"])
++    for names in groups.values():
++        if len(names) > 1:
++            return names[0]
++    return None
++
++
++def _label_blocks_keep(entry: Mapping[str, Any], control: Mapping[str, Any]) -> bool:
++    """A stable id does not keep a protected field that now reads as an identifier."""
++    if not is_protected(entry.get("purpose")):
++        return False
++    return nearby_identifier(str(control.get("label") or "")) and not _identifier_named(entry, control["label"])
++
++
++def propose_repair(previous: Mapping[str, Any], observed: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
++    """Place the previous field map onto observed controls and return a proposal.
++
++    Does not write a file. Does not submit. A refused proposal carries an empty
++    field map so a caller cannot publish a partial repair by accident.
++    """
++    previous_map = parse_previous(dict(previous))
++    controls = parse_controls(list(observed))
++    never = set(previous_map["never_submit"])
++    blocked = [
++        {
++            "selector": control["selector"],
++            "label": control["label"],
++            "reason": "Legal-effect or submit control. Not a fill target.",
++        }
++        for control in controls
++        if is_blocked(control, never)
++    ]
++    usable = [
++        control
++        for control in controls
++        if control["count"] == 1 and not is_blocked(control, never)
++    ]
++    by_selector = {control["selector"]: control for control in controls}
++    claimed: set[int] = set()
++    kept: list[dict[str, Any]] = []
++    pending: list[dict[str, Any]] = []
++
++    for entry in previous_map["field_map"]:
++        if is_blocked(
++            {"selector": entry["selector"], "label": entry["label"], "type": entry["type"]},
++            never,
++        ):
++            continue
++        found = by_selector.get(entry["selector"])
++        if (
++            found
++            and found["count"] == 1
++            and not is_blocked(found, never)
++            and types_compatible(entry["type"], found["type"])
++            and not _label_blocks_keep(entry, found)
++        ):
++            at = usable.index(found) if found in usable else -1
++            if at >= 0:
++                claimed.add(at)
++            kept.append(_placement(
++                entry,
++                entry["selector"],
++                "kept",
++                "The previous selector still resolves to one control.",
++            ))
++            continue
++        pending.append(entry)
++
++    pairs: list[tuple[int, int, int]] = []
++    for field_index, entry in enumerate(pending):
++        for control_index, control in enumerate(usable):
++            if control_index in claimed:
++                continue
++            if not types_compatible(entry["type"], control["type"]):
++                continue
++            score = score_pair(entry, control)
++            if score > 0:
++                pairs.append((field_index, control_index, score))
++
++    moved: list[dict[str, Any]] = []
++    moved_from: set[int] = set()
++    for field_index, control_index, score in pairs:
++        field_scores = [item[2] for item in pairs if item[0] == field_index]
++        control_scores = [item[2] for item in pairs if item[1] == control_index]
++        if score != max(field_scores) or score != max(control_scores):
++            continue
++        if field_scores.count(score) != 1 or control_scores.count(score) != 1:
++            continue
++        entry = pending[field_index]
++        control = usable[control_index]
++        moved_from.add(field_index)
++        claimed.add(control_index)
++        moved.append(_placement(
++            entry,
++            control["selector"],
++            "moved",
++            f'The label "{control["label"]}" is the only control that still names this field.',
++        ))
++
++    unresolved: list[dict[str, Any]] = []
++    for field_index, entry in enumerate(pending):
++        if field_index in moved_from:
++            continue
++        field_pairs = [(score, usable[index]) for owner, index, score in pairs if owner == field_index]
++        best = max((score for score, _control in field_pairs), default=0)
++        best_controls = [control for score, control in field_pairs if score == best] if best else []
++        shared = _tie_label(best_controls)
++        if shared:
++            reason = f'Tie: two controls share the label "{shared}".'
++        else:
++            purpose = canonical_purpose(entry.get("purpose")) if entry.get("purpose") else None
++            name = purpose or entry["selector"]
++            if purpose and is_protected(purpose):
++                reason = f"Refused to guess {purpose}. No unique label names this field."
++            else:
++                reason = f"No unique label match for {name}. Left unmapped rather than guessed."
++        unresolved.append(_placement(entry, None, "unresolved", reason))
++
++    placed = {item["from_selector"]: item for item in kept + moved}
++    claimed_selectors = {item["to_selector"] for item in kept + moved}
++    unmapped = [
++        {
++            "selector": control["selector"],
++            "label": control["label"],
++            "reason": "On the page, and not claimed by the previous field map.",
++        }
++        for control in usable
++        if control["selector"] not in claimed_selectors
++    ]
++
++    field_map = []
++    for entry in previous_map["field_map"]:
++        placement = placed.get(entry["selector"])
++        if not placement or not placement["to_selector"]:
++            continue
++        control = by_selector[placement["to_selector"]]
++        field_map.append(_carry(entry, control, placement["disposition"] == "moved"))
++
++    probes = _repair_probes(previous_map["probes"], placed, controls, never)
++    refused = _refusal(unresolved, field_map, probes)
++    return {
++        "publishable": refused is None,
++        "refused": refused,
++        "submission": "never",
++        "kept": kept,
++        "moved": moved,
++        "unresolved": unresolved,
++        "unmapped": unmapped,
++        "blocked": blocked,
++        "probes": probes if refused is None else [],
++        "field_map": field_map if refused is None else [],
++    }
++
++
++def _repair_probes(
++    probes: Sequence[Mapping[str, Any]],
++    placed: Mapping[str, Mapping[str, Any]],
++    controls: Sequence[Mapping[str, Any]],
++    never_submit: set[str],
++) -> list[str]:
++    by_selector = {control["selector"]: control for control in controls}
++    result: list[str] = []
++    for probe in probes:
++        selector = probe["selector"]
++        placement = placed.get(selector)
++        if placement and placement.get("to_selector"):
++            result.append(placement["to_selector"])
++            continue
++        found = by_selector.get(selector)
++        if found and found["count"] == 1 and not is_blocked(found, never_submit):
++            result.append(selector)
++            continue
++        label = normalize_label(str(probe.get("label") or ""))
++        if not label:
++            continue
++        matches = []
++        for control in controls:
++            if control["count"] != 1 or is_blocked(control, never_submit):
++                continue
++            if normalize_label(control["label"]) != label:
++                continue
++            probe_type = str(probe.get("type") or "")
++            if probe_type and not types_compatible(probe_type, control["type"]):
++                continue
++            matches.append(control["selector"])
++        if len(matches) == 1:
++            result.append(matches[0])
++    ordered: list[str] = []
++    for selector in result:
++        if selector not in ordered:
++            ordered.append(selector)
++    return ordered
++
++
++def _refusal(
++    unresolved: Sequence[Mapping[str, Any]],
++    field_map: Sequence[Mapping[str, Any]],
++    probes: Sequence[str],
++) -> Optional[str]:
++    if unresolved:
++        names = [item.get("purpose") or item["from_selector"] for item in unresolved]
++        protected = [str(name) for name in names if name and is_protected(str(name))]
++        shown = ", ".join(str(name) for name in names)
++        if protected:
++            blocked = ", ".join(protected)
++            return (
++                f"Refused to guess {blocked}. "
++                f"{len(unresolved)} field(s) had no unique label match ({shown})."
++            )
++        return f"{len(unresolved)} field(s) had no unique label match ({shown})."
++    if not field_map:
++        return "No field could be carried forward."
++    if not probes:
++        return "The repair produced no freshness probe."
++    return None
++
++
++def dry_run(playbook_path: Union[str, Path], observation_path: Union[str, Path]) -> dict[str, Any]:
++    """Read a playbook and an observation. Return a proposal. Write nothing."""
++    playbook = load_playbook(playbook_path)
++    payload = json.loads(Path(observation_path).read_text(encoding="utf-8"))
++    embedded, controls = split_observation(payload)
++    previous = embedded if embedded is not None else playbook
++    return propose_repair(previous, controls)
++
++
++def main(argv: Optional[Sequence[str]] = None) -> int:
++    import argparse
++    import sys
++
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("playbook")
++    parser.add_argument("observation")
++    args = parser.parse_args(list(argv) if argv is not None else None)
++    try:
++        proposal = dry_run(args.playbook, args.observation)
++    except ObservationError as exc:
++        print(str(exc), file=sys.stderr)
++        return 2
++    print(json.dumps(proposal, indent=2, sort_keys=True))
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/skills/agentic-grant-application/scripts/grant_batch.py b/skills/agentic-grant-application/scripts/grant_batch.py
+index 8c55731..39bc42c 100755
+--- a/skills/agentic-grant-application/scripts/grant_batch.py
++++ b/skills/agentic-grant-application/scripts/grant_batch.py
+@@ -359,6 +359,16 @@ def build_parser() -> argparse.ArgumentParser:
+     discover_parser.add_argument("--page-size", type=int, default=25)
+     discover_parser.add_argument("--api-key-env", default="SIMPLER_GRANTS_API_KEY")
+     discover_parser.add_argument("--output")
++
++    repair = sub.add_parser(
++        "repair-fields",
++        description=(
++            "Dry-run a deterministic field-map repair. Prints a proposal and "
++            "does not rewrite the playbook, call a model, or submit a form."
++        ),
++    )
++    repair.add_argument("playbook", help="Playbook markdown containing a Field map JSON block")
++    repair.add_argument("observation", help="Observed controls JSON: selector, label, type, count")
+     return parser
+ 
+ 
+@@ -382,6 +392,20 @@ def main(argv: Optional[list[str]] = None) -> int:
+         write_json(discover(args.query, key, args.page_size), args.output)
+         return 0
+ 
++    if args.command == "repair-fields":
++        scripts = Path(__file__).resolve().parent
++        if str(scripts) not in sys.path:
++            sys.path.insert(0, str(scripts))
++        import field_repair
++
++        try:
++            proposal = field_repair.dry_run(args.playbook, args.observation)
++        except field_repair.ObservationError as exc:
++            print(str(exc), file=sys.stderr)
++            return 2
++        write_json(proposal, None)
++        return 0
++
+     profile = load_json(args.profile)
+     errors = validate_profile(profile)
+     if errors:
+diff --git a/tests/test_field_repair.py b/tests/test_field_repair.py
+new file mode 100644
+index 0000000..d1d6234
+--- /dev/null
++++ b/tests/test_field_repair.py
+@@ -0,0 +1,462 @@
++import importlib.util
++import json
++import subprocess
++import sys
++import tempfile
++import unittest
++from pathlib import Path
++
++
++ROOT = Path(__file__).resolve().parents[1]
++MODULE_PATH = ROOT / "skills/agentic-grant-application/scripts/field_repair.py"
++BATCH_PATH = ROOT / "skills/agentic-grant-application/scripts/grant_batch.py"
++PLAYBOOK = ROOT / "skills/agentic-grant-application/playbooks/demo.local.md"
++FIXTURES = ROOT / "fixtures/field-repair"
++PORTAL = ROOT / "fixtures/demo-portal/index.html"
++
++SPEC = importlib.util.spec_from_file_location("field_repair", MODULE_PATH)
++field_repair = importlib.util.module_from_spec(SPEC)
++assert SPEC.loader
++SPEC.loader.exec_module(field_repair)
++
++NEARBY = ("Project ID", "Case number", "Reference number")
++CLEAR_LABELS = {
++    "ein": "Employer Identification Number",
++    "ssn": "Social Security Number",
++    "bank_account": "Bank account number",
++    "award_amount": "Federal amount requested",
++}
++COMPOUND = {
++    "ein": "EIN project id",
++    "ssn": "Social Security case number",
++    "bank_account": "Bank reference number",
++    "award_amount": "Requested amount reference number",
++}
++
++
++def load_json(path):
++    return json.loads(path.read_text(encoding="utf-8"))
++
++
++def generic_overlap(entry, label):
++    """A mapper that scores every shared token, including number and id."""
++    strong, weak = field_repair.entry_words(entry)
++    observed = field_repair.tokenize(label)
++    return len(strong & observed) * 10 + len(weak & observed)
++
++
++def previous_for(purpose, label, selector="#field"):
++    return {
++        "probes": [selector],
++        "field_map": [{
++            "selector": selector,
++            "purpose": purpose,
++            "label": label,
++            "type": "text",
++            "required": True,
++        }],
++        "never_submit": ["#submit-application"],
++    }
++
++
++def control(selector, label, control_type="text", count=1):
++    return {"selector": selector, "label": label, "type": control_type, "count": count}
++
++
++class FieldRepairTests(unittest.TestCase):
++    def dry(self, name):
++        return field_repair.dry_run(PLAYBOOK, FIXTURES / name)
++
++    def test_playbook_selectors_are_on_the_demo_form(self):
++        playbook = field_repair.load_playbook(PLAYBOOK)
++        html = PORTAL.read_text(encoding="utf-8")
++        purposes = [entry["purpose"] for entry in playbook["field_map"]]
++        self.assertIn("award_amount", purposes)
++        self.assertEqual(playbook["never_submit"], ["#submit-application"])
++        for entry in playbook["field_map"]:
++            self.assertIn(entry["selector"].lstrip("#"), html)
++        for probe in playbook["probes"]:
++            self.assertIn(probe["selector"].lstrip("#"), html)
++
++    def test_observation_rejects_a_value_and_unknown_keys(self):
++        with self.assertRaises(field_repair.ObservationError) as raised:
++            field_repair.parse_controls([{
++                "selector": "#ein",
++                "label": "EIN",
++                "type": "text",
++                "count": 1,
++                "value": "12-3456789",
++            }])
++        self.assertIn("value", str(raised.exception))
++        with self.assertRaises(field_repair.ObservationError):
++            field_repair.parse_controls([{
++                "selector": "#ein",
++                "label": "EIN",
++                "type": "text",
++                "count": 1,
++                "filled": True,
++            }])
++
++    def test_renamed_ids_with_unique_labels_are_publishable(self):
++        before = PLAYBOOK.read_bytes()
++        proposal = self.dry("renamed-ids.json")
++        self.assertEqual(PLAYBOOK.read_bytes(), before)
++        self.assertTrue(proposal["publishable"])
++        self.assertIsNone(proposal["refused"])
++        self.assertEqual(proposal["submission"], "never")
++        self.assertEqual(proposal["kept"], [])
++        by_purpose = {entry["purpose"]: entry for entry in proposal["field_map"]}
++        self.assertEqual(list(by_purpose), [
++            "organization_name",
++            "has_uei",
++            "uei",
++            "project_title",
++            "project_abstract",
++            "award_amount",
++            "project_director",
++        ])
++        self.assertEqual(by_purpose["organization_name"]["selector"], "#org-legal-name")
++        self.assertEqual(by_purpose["award_amount"]["selector"], "#federal-request")
++        self.assertTrue(by_purpose["award_amount"]["required"])
++        self.assertEqual(by_purpose["project_title"]["selector"], "#proposal-title")
++        self.assertEqual(
++            proposal["probes"],
++            ["#org-legal-name", "#proposal-title", "#save-draft-btn"],
++        )
++        self.assertNotIn("#reference-number", [entry["selector"] for entry in proposal["field_map"]])
++        self.assertIn("#reference-number", [item["selector"] for item in proposal["unmapped"]])
++        self.assertIn("#submit-application", [item["selector"] for item in proposal["blocked"]])
++        rendered = json.dumps(proposal["field_map"])
++        self.assertNotIn("submit-application", rendered)
++        self.assertNotIn("value", rendered)
++
++    def test_tie_blocks_publish_even_when_other_fields_match(self):
++        fixture = load_json(FIXTURES / "tie.json")
++        labels = [control["label"] for control in fixture["controls"]]
++        self.assertEqual(labels.count("Project title"), 2)
++        proposal = self.dry("tie.json")
++        self.assertFalse(proposal["publishable"])
++        self.assertEqual(proposal["field_map"], [])
++        self.assertEqual(
++            [item["purpose"] for item in proposal["unresolved"]],
++            ["project_title"],
++        )
++        self.assertIn("Tie", proposal["unresolved"][0]["reason"])
++        self.assertIn("Project title", proposal["unresolved"][0]["reason"])
++        award = next(item for item in proposal["moved"] if item["purpose"] == "award_amount")
++        self.assertEqual(award["to_selector"], "#federal-request")
++        self.assertNotIn(
++            "#reference-number",
++            [item["to_selector"] for item in proposal["moved"]],
++        )
++
++    def test_dropped_field_blocks_publish(self):
++        fixture = load_json(FIXTURES / "dropped-field.json")
++        labels = [control["label"] for control in fixture["controls"]]
++        self.assertNotIn("Project abstract", labels)
++        proposal = self.dry("dropped-field.json")
++        self.assertFalse(proposal["publishable"])
++        self.assertEqual(proposal["field_map"], [])
++        self.assertEqual(proposal["probes"], [])
++        self.assertEqual(
++            [item["purpose"] for item in proposal["unresolved"]],
++            ["project_abstract"],
++        )
++        self.assertTrue(any(item["purpose"] == "organization_name" for item in proposal["moved"]))
++
++    def test_bank_account_does_not_move_onto_reference_number(self):
++        fixture = load_json(FIXTURES / "bank-account-reference.json")
++        self.assertEqual(
++            [control["label"] for control in fixture["controls"]],
++            ["Reference number"],
++        )
++        entry = fixture["previous"]["field_map"][0]
++        self.assertEqual(entry["purpose"], "bank_account")
++        self.assertGreater(generic_overlap(entry, "Reference number"), 0)
++        strong, _weak = field_repair.entry_words(entry)
++        self.assertFalse(strong & field_repair.tokenize("Reference number"))
++        before = PLAYBOOK.read_bytes()
++        proposal = self.dry("bank-account-reference.json")
++        self.assertEqual(PLAYBOOK.read_bytes(), before)
++        self.assertFalse(proposal["publishable"])
++        self.assertEqual(proposal["moved"], [])
++        self.assertEqual(proposal["kept"], [])
++        self.assertEqual(proposal["field_map"], [])
++        self.assertEqual(proposal["submission"], "never")
++        self.assertEqual([item["purpose"] for item in proposal["unresolved"]], ["bank_account"])
++        self.assertIn("bank_account", proposal["refused"])
++        self.assertNotIn(
++            "#reference-number",
++            [item["to_selector"] for item in proposal["moved"] + proposal["kept"]],
++        )
++
++    def test_protected_fields_share_only_weak_tokens_with_nearby_identifiers(self):
++        for purpose, label in CLEAR_LABELS.items():
++            entry = previous_for(purpose, label)["field_map"][0]
++            strong, weak = field_repair.entry_words(entry)
++            for nearby in NEARBY:
++                observed = field_repair.tokenize(nearby)
++                self.assertFalse(strong & observed, (purpose, nearby))
++                self.assertTrue(weak & observed, (purpose, nearby, weak))
++                self.assertGreater(generic_overlap(entry, nearby), 0)
++
++    def test_exact_nearby_identifier_never_receives_a_protected_field(self):
++        for purpose, label in CLEAR_LABELS.items():
++            for nearby in NEARBY:
++                with self.subTest(purpose=purpose, nearby=nearby):
++                    proposal = field_repair.propose_repair(
++                        previous_for(purpose, label),
++                        [control("#nearby", nearby)],
++                    )
++                    self.assertFalse(proposal["publishable"])
++                    self.assertEqual(proposal["field_map"], [])
++                    self.assertEqual(proposal["moved"], [])
++                    self.assertIn(purpose, proposal["refused"])
++
++    def test_clear_token_loses_when_the_label_is_still_a_nearby_identifier(self):
++        for purpose, label in COMPOUND.items():
++            with self.subTest(purpose=purpose, label=label):
++                entry = previous_for(purpose, CLEAR_LABELS[purpose])["field_map"][0]
++                strong, _weak = field_repair.entry_words(entry)
++                self.assertTrue(strong & field_repair.tokenize(label), (purpose, label))
++                self.assertTrue(field_repair.nearby_identifier(label))
++                proposal = field_repair.propose_repair(
++                    previous_for(purpose, CLEAR_LABELS[purpose]),
++                    [control("#nearby", label)],
++                )
++                self.assertFalse(proposal["publishable"])
++                self.assertEqual(proposal["moved"], [])
++
++    def test_clear_label_wins_when_a_nearby_identifier_is_also_present(self):
++        cases = {
++            "ein": ("Employer Identification Number", "#ein-new"),
++            "ssn": ("Social Security Number", "#ssn-new"),
++            "bank_account": ("Bank account number", "#bank-new"),
++            "award_amount": ("Federal amount requested", "#amount-new"),
++        }
++        for purpose, (label, selector) in cases.items():
++            with self.subTest(purpose=purpose):
++                proposal = field_repair.propose_repair(
++                    previous_for(purpose, label, "#old"),
++                    [
++                        control("#nearby", COMPOUND[purpose]),
++                        control(selector, label),
++                    ],
++                )
++                self.assertTrue(proposal["publishable"], proposal["refused"])
++                self.assertEqual(proposal["field_map"][0]["selector"], selector)
++                self.assertEqual(proposal["unmapped"][0]["selector"], "#nearby")
++
++    def test_award_number_is_not_an_award_amount(self):
++        entry = previous_for("award_amount", "Federal amount requested")["field_map"][0]
++        strong, weak = field_repair.entry_words(entry)
++        observed = field_repair.tokenize("Award number")
++        self.assertFalse(strong & observed)
++        self.assertTrue(weak & observed)
++        proposal = field_repair.propose_repair(
++            previous_for("award_amount", "Federal amount requested"),
++            [control("#award-number", "Award number")],
++        )
++        self.assertFalse(proposal["publishable"])
++        self.assertEqual(proposal["moved"], [])
++
++    def test_clear_bank_and_award_labels_still_move(self):
++        bank = field_repair.propose_repair(
++            previous_for("bank_account", "Bank account number"),
++            [control("#routing", "Routing number")],
++        )
++        self.assertTrue(bank["publishable"], bank["refused"])
++        self.assertEqual(bank["field_map"][0]["selector"], "#routing")
++        award = field_repair.propose_repair(
++            previous_for("award_amount", "Federal amount requested"),
++            [control("#request", "Amount requested")],
++        )
++        self.assertTrue(award["publishable"], award["refused"])
++        self.assertEqual(award["field_map"][0]["selector"], "#request")
++
++    def test_requested_amount_alias_stays_protected(self):
++        self.assertTrue(field_repair.is_protected("requested_amount"))
++        self.assertTrue(field_repair.is_protected("awardAmount"))
++        self.assertTrue(field_repair.is_protected("bankAccount"))
++        self.assertTrue(field_repair.is_protected("ssn"))
++        self.assertTrue(field_repair.is_protected("ein"))
++        self.assertFalse(field_repair.is_protected("project_title"))
++        self.assertFalse(field_repair.is_protected("reference_number"))
++        self.assertFalse(field_repair.is_protected("uei"))
++        proposal = field_repair.propose_repair(
++            previous_for("requested_amount", "Federal amount requested"),
++            [control("#case-number", "Case number")],
++        )
++        self.assertFalse(proposal["publishable"])
++        self.assertIn("award_amount", proposal["refused"])
++
++    def test_same_protected_label_is_a_tie(self):
++        proposal = field_repair.propose_repair(
++            previous_for("bank_account", "Bank account number"),
++            [
++                control("#bank-a", "Bank account number"),
++                control("#bank-b", "Bank account number"),
++            ],
++        )
++        self.assertFalse(proposal["publishable"])
++        self.assertIn("Tie", proposal["unresolved"][0]["reason"])
++        self.assertEqual(proposal["field_map"], [])
++
++    def test_reference_number_field_can_use_its_own_label(self):
++        proposal = field_repair.propose_repair(
++            previous_for("reference_number", "Reference number", "#ref"),
++            [control("#ref-new", "Reference number")],
++        )
++        self.assertTrue(proposal["publishable"], proposal["refused"])
++        self.assertEqual(proposal["field_map"][0]["selector"], "#ref-new")
++
++    def test_project_title_and_uei_do_not_fall_onto_project_id(self):
++        title = field_repair.propose_repair(
++            previous_for("project_title", "Project title", "#title"),
++            [control("#project-id", "Project ID")],
++        )
++        self.assertFalse(title["publishable"])
++        self.assertEqual(title["moved"], [])
++        uei = field_repair.propose_repair(
++            previous_for("uei", "Unique Entity ID", "#uei"),
++            [control("#project-id", "Project ID")],
++        )
++        self.assertFalse(uei["publishable"])
++        self.assertEqual(uei["moved"], [])
++
++    def test_keeps_a_selector_that_still_matches_one_control(self):
++        playbook = field_repair.load_playbook(PLAYBOOK)
++        controls = [
++            control(entry["selector"], entry["label"], entry["type"])
++            for entry in playbook["field_map"]
++        ]
++        controls.extend([
++            control("#save-draft", "Save draft", "button"),
++            control("#reference-number", "Reference number"),
++            control("#submit-application", "Sign and submit", "submit"),
++        ])
++        proposal = field_repair.propose_repair(playbook, controls)
++        self.assertTrue(proposal["publishable"], proposal["refused"])
++        self.assertEqual(proposal["moved"], [])
++        self.assertEqual(
++            [entry["selector"] for entry in proposal["field_map"]],
++            [entry["selector"] for entry in playbook["field_map"]],
++        )
++        self.assertEqual(
++            proposal["probes"],
++            ["#organization-name", "#project-title", "#save-draft"],
++        )
++
++    def test_does_not_keep_an_ambiguous_selector(self):
++        playbook = field_repair.load_playbook(PLAYBOOK)
++        controls = []
++        for entry in playbook["field_map"]:
++            count = 2 if entry["purpose"] == "organization_name" else 1
++            controls.append(control(entry["selector"], entry["label"], entry["type"], count))
++        controls.append(control("#org-legal-name", "Organization legal name"))
++        controls.append(control("#save-draft", "Save draft", "button"))
++        proposal = field_repair.propose_repair(playbook, controls)
++        self.assertTrue(proposal["publishable"], proposal["refused"])
++        organization = proposal["field_map"][0]
++        self.assertEqual(organization["purpose"], "organization_name")
++        self.assertEqual(organization["selector"], "#org-legal-name")
++        self.assertEqual(proposal["kept"][0]["purpose"], "has_uei")
++
++    def test_protected_field_is_not_kept_when_its_label_is_now_an_identifier(self):
++        proposal = field_repair.propose_repair(
++            previous_for("bank_account", "Bank account number", "#bank-account"),
++            [control("#bank-account", "Reference number")],
++        )
++        self.assertFalse(proposal["publishable"])
++        self.assertEqual(proposal["kept"], [])
++        self.assertEqual(proposal["field_map"], [])
++
++    def test_mask_is_preserved_when_a_field_moves(self):
++        previous = previous_for("ein", "Employer Identification Number", "#ein")
++        previous["field_map"][0]["mask"] = "99-9999999"
++        previous["field_map"][0]["method"] = "keys"
++        proposal = field_repair.propose_repair(
++            previous,
++            [control("#ein-new", "EIN")],
++        )
++        self.assertTrue(proposal["publishable"], proposal["refused"])
++        self.assertEqual(proposal["field_map"][0]["mask"], "99-9999999")
++        self.assertEqual(proposal["field_map"][0]["method"], "keys")
++        self.assertEqual(proposal["field_map"][0]["selector"], "#ein-new")
++
++    def test_submit_control_is_never_a_fill_target(self):
++        previous = previous_for("organization_name", "Organization legal name", "#org")
++        previous["field_map"].append({
++            "selector": "#submit-application",
++            "purpose": "submit",
++            "label": "Sign and submit",
++            "type": "submit",
++            "required": False,
++        })
++        proposal = field_repair.propose_repair(
++            previous,
++            [
++                control("#org-new", "Organization legal name"),
++                control("#send", "Sign and submit", "submit"),
++            ],
++        )
++        self.assertTrue(proposal["publishable"], proposal["refused"])
++        self.assertEqual(
++            [entry["selector"] for entry in proposal["field_map"]],
++            ["#org-new"],
++        )
++        self.assertEqual(proposal["submission"], "never")
++        self.assertEqual(proposal["blocked"][0]["selector"], "#send")
++
++    def test_repair_module_does_not_call_a_model_or_write(self):
++        source = MODULE_PATH.read_text(encoding="utf-8").lower()
++        for banned in ("openai", "anthropic", "urlopen", "api_key", "write_text", "requests"):
++            self.assertNotIn(banned, source)
++
++    def test_cli_dry_run_prints_a_proposal_and_does_not_write(self):
++        before = PLAYBOOK.read_bytes()
++        playbooks = sorted(path.name for path in PLAYBOOK.parent.glob("*"))
++        completed = subprocess.run(
++            [
++                str(ROOT / "bin/grant-filler"),
++                "repair-fields",
++                str(PLAYBOOK),
++                str(FIXTURES / "renamed-ids.json"),
++            ],
++            check=False,
++            capture_output=True,
++            text=True,
++        )
++        self.assertEqual(completed.returncode, 0, completed.stderr)
++        proposal = json.loads(completed.stdout)
++        self.assertTrue(proposal["publishable"])
++        self.assertEqual(proposal["submission"], "never")
++        self.assertEqual(PLAYBOOK.read_bytes(), before)
++        self.assertEqual(sorted(path.name for path in PLAYBOOK.parent.glob("*")), playbooks)
++
++        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as handle:
++            json.dump([{
++                "selector": "#ein",
++                "label": "EIN",
++                "type": "text",
++                "count": 1,
++                "value": "12-3456789",
++            }], handle)
++            valued = Path(handle.name)
++        try:
++            rejected = subprocess.run(
++                [sys.executable, str(BATCH_PATH), "repair-fields", str(PLAYBOOK), str(valued)],
++                check=False,
++                capture_output=True,
++                text=True,
++            )
++        finally:
++            valued.unlink()
++        self.assertEqual(rejected.returncode, 2)
++        self.assertIn("value", rejected.stderr.lower())
++        self.assertNotIn("12-3456789", rejected.stdout)
++        self.assertEqual(PLAYBOOK.read_bytes(), before)
++
++
++if __name__ == "__main__":
++    unittest.main()
