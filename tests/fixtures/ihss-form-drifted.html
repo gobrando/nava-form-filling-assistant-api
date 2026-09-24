@@ -1,0 +1,134 @@
+<!doctype html>
+<!--
+  An IHSS-sized page after a site change. Twenty-six fields, fictional labels.
+
+  Some ids are the ones the old map already used. Some questions kept their
+  wording and got a new id. Childcare is on the page twice, so that field is a
+  tie. Social Security is not on the page; Case number is, and must not inherit
+  it. Unemployment benefits is not on the page at all.
+
+  No control has a value. This fixture is selectors and labels only.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>IHSS application — drifted fixture</title>
+  </head>
+  <body>
+    <h1>In-Home Supportive Services</h1>
+    <form id="ihss-application">
+      <label for="applicant-first">Applicant first name</label>
+      <input id="applicant-first" name="applicant_first" type="text" required />
+
+      <label for="applicant-last">Applicant last name</label>
+      <input id="applicant-last" name="applicant_last" type="text" required />
+
+      <label for="applicant-dob">Date of birth</label>
+      <input id="applicant-dob" name="applicant_dob" type="date" required />
+
+      <label for="applicant-phone">Phone number</label>
+      <input id="applicant-phone" name="applicant_phone" type="tel" required />
+
+      <label for="applicant-street">Street address</label>
+      <input id="applicant-street" name="applicant_street" type="text" required />
+
+      <label for="city">City</label>
+      <input id="city" name="city" type="text" required />
+
+      <label for="applicant-zip">ZIP code</label>
+      <input id="applicant-zip" name="applicant_zip" type="text" required />
+
+      <label for="applicant-language">Primary language</label>
+      <select id="applicant-language" name="applicant_language">
+        <option>- Select -</option>
+        <option>English</option>
+        <option>Spanish</option>
+      </select>
+
+      <label for="applicant-email">Email address</label>
+      <input id="applicant-email" name="applicant_email" type="email" />
+
+      <label for="county">County of residence</label>
+      <input id="county" name="county" type="text" required />
+
+      <label for="lives-alone">Lives alone</label>
+      <select id="lives-alone" name="lives_alone" required>
+        <option>- Select -</option>
+        <option>Yes</option>
+        <option>No</option>
+      </select>
+
+      <label for="care-hours">Weekly care hours</label>
+      <input id="care-hours" name="care_hours" type="number" required />
+
+      <label for="provider-relation">Provider relationship</label>
+      <select id="provider-relation" name="provider_relation" required>
+        <option>- Select -</option>
+        <option>Spouse</option>
+        <option>Adult child</option>
+        <option>Other relative</option>
+        <option>Not related</option>
+      </select>
+
+      <label for="provider-in-home">Provider lives in the home</label>
+      <select id="provider-in-home" name="provider_in_home">
+        <option>- Select -</option>
+        <option>Yes</option>
+        <option>No</option>
+      </select>
+
+      <label for="mailing-home">Mailing address is the home address</label>
+      <select id="mailing-home" name="mailing_home">
+        <option>- Select -</option>
+        <option>Yes</option>
+        <option>No</option>
+      </select>
+
+      <label for="emergency-name">Emergency contact name</label>
+      <input id="emergency-name" name="emergency_name" type="text" />
+
+      <label for="authorized-representative">Authorized representative</label>
+      <input id="authorized-representative" name="authorized_representative" type="text" />
+
+      <label for="supervision">Protective supervision</label>
+      <select id="supervision" name="supervision" required>
+        <option>- Select -</option>
+        <option>Yes</option>
+        <option>No</option>
+      </select>
+
+      <label for="paramedical">Paramedical services</label>
+      <select id="paramedical" name="paramedical">
+        <option>- Select -</option>
+        <option>Yes</option>
+        <option>No</option>
+      </select>
+
+      <label for="ssi-income">SSI income</label>
+      <select id="ssi-income" name="ssi_income">
+        <option>- Select -</option>
+        <option>Yes</option>
+        <option>No</option>
+      </select>
+
+      <label for="childcare-one">Childcare</label>
+      <input id="childcare-one" name="childcare_one" type="text" />
+
+      <label for="childcare-two">Childcare</label>
+      <input id="childcare-two" name="childcare_two" type="text" />
+
+      <label for="case-number">Case number</label>
+      <input id="case-number" name="case_number" type="text" />
+
+      <label for="medi-cal-number">Medi-Cal number</label>
+      <input id="medi-cal-number" name="medi_cal_number" type="text" />
+
+      <label for="signature-date">Signature date</label>
+      <input id="signature-date" name="signature_date" type="date" />
+
+      <input id="unlabeled-box" name="unlabeled" type="text" />
+
+      <button id="submit-ihss" type="submit">Submit</button>
+    </form>
+  </body>
+</html>

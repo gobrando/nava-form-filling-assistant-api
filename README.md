@@ -353,6 +353,28 @@ That runs the drifted WIC fixture and an SSN-versus-case-number check with no
 database and no model. The ZIP field on that fixture still truncates, so a
 repaired playbook does not skip readback.
 
+### On the caseworker desk
+
+```bash
+pnpm dev
+```
+
+Open [http://localhost:3000/work/repair](http://localhost:3000/work/repair). That
+is the drifted WIC form, as a dry run. Open
+[http://localhost:3000/work/repair?form=ihss](http://localhost:3000/work/repair?form=ihss)
+for an IHSS-sized drifted form. The page lists what stayed on the old selector,
+what moved (old selector, new selector, and the label), and what was refused:
+a tie, a protected field that would have landed on the wrong label, or a label
+that is missing. It does not show household values. The WIC ZIP box still holds
+4 characters, and the page says so, because a repaired playbook does not skip
+readback.
+
+Publishing is a separate action. The page names it: `POST /v1/programs/{slug}/playbook/repair`
+with the same observation and `"publish": true`, after the proposal says it can
+be published. That writes a version for the organization. The shared playbook
+is left alone. On a local demo database the desk can save that version for the
+demo organization. The packet at `/work` is unchanged.
+
 ## What is and isn't proven
 
 | | Status |

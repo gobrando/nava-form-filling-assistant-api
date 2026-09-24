@@ -77,6 +77,11 @@ export default async function WorkPage({
         </p>
       </div>
 
+      <p className="footnote">
+        When the county page moves a box and the label still matches, the map can be repaired
+        without a model. <a href="/work/repair">Review that repair</a>.
+      </p>
+
       <p className="notice">
         The last measured decision pass, on a 26-control page, cost $0.000310. This packet uses that
         split: nine fields from the record, questions for the client, and identifiers left blank.
