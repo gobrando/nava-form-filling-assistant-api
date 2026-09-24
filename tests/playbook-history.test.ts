@@ -173,8 +173,10 @@ describe('playbook history page', () => {
   it('links from the caseworker desk without rewriting the packet', () => {
     const source = readFileSync('app/work/page.tsx', 'utf8');
     expect(source).toContain('href="/work/playbooks"');
-    expect(source).toContain('Jordan Sample');
+    expect(source).toContain('href="/work/repair"');
     expect(source).toContain('From the case record');
+    expect(source).toContain('Left blank');
+    expect(source).toContain('Ask the client');
   });
 
   it('explains that Postgres is unavailable and still renders the fixture', async () => {
