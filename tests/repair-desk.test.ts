@@ -159,6 +159,15 @@ describe('values stay off the desk', () => {
   });
 });
 
+describe('the IHSS packet', () => {
+  it('points at the repair desk without taking over the packet view', () => {
+    const page = readFileSync('app/work/page.tsx', 'utf8');
+    expect(page).toContain('href="/work/repair"');
+    expect(page).toMatch(/repaired\s+without\s+a model/);
+    expect(page.match(/href="\/work\/repair"/g)).toHaveLength(1);
+  });
+});
+
 describe('publishing stays a separate step', () => {
   it('does not open a database when the proposal is refused or Postgres is unset', async () => {
     const previous = process.env.POSTGRES_URL;
