@@ -1,0 +1,389 @@
+diff --git a/.claude/skills/knowledge-scribe/SKILL.md b/.claude/skills/knowledge-scribe/SKILL.md
+index c51c3fa..7532766 100644
+--- a/.claude/skills/knowledge-scribe/SKILL.md
++++ b/.claude/skills/knowledge-scribe/SKILL.md
+@@ -147,6 +147,7 @@ A profile is data (`scribe/profiles/*.json`) — it declares the wake markers, t
+ | `codebase` | a dev team: the build/test/lint invocations that actually worked, environment gotchas, architecture facts, flaky tests, "this failed, here is what worked" |
+ | `product-loop` | this lab: gate corrections, drift findings, provenance rules, per-target operational facts |
+ | `form-completion` | a browser agent across many sites: per-site playbooks (scoped forever), widget behaviour (promotable), readback verification |
++| `form-filling` | a form-filling run: execution mode, kept/moved/unresolved counts, refusal reasons, and whether a human submit was recorded. Values are refused. The tool does not submit |
+ | `generic` | the zero-config default — explicit markers, commands, and failure/fix pairs only |
+ 
+ `scribe init` sniffs one. Adding a domain is writing one JSON file — see `docs/knowledge-scribe.md`.
+diff --git a/README.md b/README.md
+index cf53418..e84fb86 100644
+--- a/README.md
++++ b/README.md
+@@ -46,14 +46,26 @@ The Python side is a deterministic verifier. The agent supplies judgment. The sp
+ 
+ ### Profiles
+ 
+-A profile declares which markers wake the scribe, what categories to extract and what each means, where each is filed, what to redact, and how many targets promotion needs. Four ship:
++A profile declares which markers wake the scribe, what categories to extract and what each means, where each is filed, what to redact, and how many targets promotion needs. Five ship:
+ 
+ - `generic` — zero-config default
+ - `codebase` — for a dev team: build/test commands that worked, environment gotchas, flaky tests, "this failed and here's what worked instead"
+ - `product-loop` — gate corrections, drift findings, target operational facts
+ - `form-completion` — reproduces the original skill's behaviour
++- `form-filling` — a form-filling run: mode, field counts, refusal reasons, human submit; values refused
+ 
+-Adding a fifth is writing a JSON file.
++Adding another is writing a JSON file.
++
++### Form-filling
++
++`form-filling` records a form-filling agent run. The warm path is a script and no model; a model mode is recorded only when the transcript states one. It confirms execution mode, the kept / moved / unresolved counts, the refusal reason, and whether a human submit was recorded. A tie, a protected field on the wrong label (an SSN must not become a case number; a signature date must not become a date of birth), a dropped field, or a partial publish is a refusal — the guess is not the record. Lines that carry an SSN, a name, income, or a date of birth are refused. The saved record is counts and reasons. A human submits. The tool does not, and an agent claim that it submitted is not recorded as a submit.
++
++```bash
++python3 -m scribe.cli replay \
++    --transcript scribe/fixtures/form-filling/warm-repair.jsonl \
++    --profile form-filling --target wic-warm
++python3 scribe/test_scribe.py
++```
+ 
+ ---
+ 
+@@ -95,7 +107,7 @@ Stated plainly, because the failure mode of a tool like this is quiet overconfid
+ ## Tests
+ 
+ ```bash
+-python3 scribe/test_scribe.py     # 341 assertions, offline, no network
++python3 scribe/test_scribe.py     # 387 assertions, offline, no network
+ ```
+ 
+ Everything is driven against synthetic transcript fixtures in temp dirs. The suite includes a check that the package imports with no host system present — the independence claim above is tested, not asserted.
+diff --git a/docs/knowledge-scribe.md b/docs/knowledge-scribe.md
+index 3fda4d5..9b01d0b 100644
+--- a/docs/knowledge-scribe.md
++++ b/docs/knowledge-scribe.md
+@@ -171,7 +171,7 @@ A profile is **data, not code**. Adding a domain is writing one JSON file in `sc
+ | `redaction.patterns` / `value_cues` / `disable` | domain leak rules on top of the defaults. |
+ | `stall_cycles` | consecutive empty stall wakes before the scribe may stop. |
+ 
+-Shipped profiles: **`codebase`** (dev teams), **`product-loop`** (this lab: gate corrections, drift findings, provenance rules, per-target operational facts), **`form-completion`** (the domain this was generalized from — per-site playbooks scoped forever, widget behaviour promotable), **`generic`** (zero-config default).
++Shipped profiles: **`codebase`** (dev teams), **`product-loop`** (this lab: gate corrections, drift findings, provenance rules, per-target operational facts), **`form-completion`** (the domain this was generalized from — per-site playbooks scoped forever, widget behaviour promotable), **`form-filling`** (a form-filling run: execution mode, kept/moved/unresolved counts, refusal reasons, human submit; values refused), **`generic`** (zero-config default).
+ 
+ `profile.validate_profile` refuses a malformed profile rather than degrading around it: a category with no `cues` can never fire, a category with no `means` gives the agent nothing to route by, a `redaction.pattern` that is missing or matches the empty string is a named check that can never fire, and `minimum_confirming_targets` below 2 deletes the promotion gate. All are defects in the profile, and a silently-degraded profile writes silently-wrong files.
+ 
+diff --git a/scribe/fixtures/form-filling/agent-claimed-submit.jsonl b/scribe/fixtures/form-filling/agent-claimed-submit.jsonl
+new file mode 100644
+index 0000000..05e4529
+--- /dev/null
++++ b/scribe/fixtures/form-filling/agent-claimed-submit.jsonl
+@@ -0,0 +1,3 @@
++{"type": "user", "sessionId": "form-run", "uuid": "s-user", "message": {"role": "user", "content": "Leave the form for the caseworker. My request id is \"REQ-2041\"."}}
++{"type": "assistant", "sessionId": "form-run", "uuid": "s-asst", "message": {"role": "assistant", "content": [{"type": "text", "text": "I submitted the form. The tool submitted the application."}, {"type": "tool_use", "id": "s-asst-tool", "name": "Bash", "input": {"command": "repair --warm"}}]}}
++{"type": "user", "sessionId": "form-run", "uuid": "s-result", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "is_error": false, "content": "execution mode: script; warm path: no model\nfield counts: kept 16, moved 12, unresolved 11\nhuman_submit: recorded; submission is human\nexit code 0\n"}]}}
+diff --git a/scribe/fixtures/form-filling/refusal-ssn-case-number.jsonl b/scribe/fixtures/form-filling/refusal-ssn-case-number.jsonl
+new file mode 100644
+index 0000000..7ab976e
+--- /dev/null
++++ b/scribe/fixtures/form-filling/refusal-ssn-case-number.jsonl
+@@ -0,0 +1,3 @@
++{"type": "user", "sessionId": "form-run", "uuid": "r-user", "message": {"role": "user", "content": "Repair the WIC page. My request id is \"REQ-1902\"."}}
++{"type": "assistant", "sessionId": "form-run", "uuid": "r-asst", "message": {"role": "assistant", "content": [{"type": "text", "text": "GUESS: the ssn is the case number, so I will fill that label."}, {"type": "tool_use", "id": "r-asst-tool", "name": "Bash", "input": {"command": "repair --warm"}}]}}
++{"type": "user", "sessionId": "form-run", "uuid": "r-result", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "is_error": false, "content": "GUESS: the ssn is the case number, so I will fill that label.\nexecution mode: script; warm path: no model\nfield counts: kept 14, moved 10, unresolved 13\nrefusal: ssn must not become case number; publish is all or nothing\nexit code 0\n"}]}}
+diff --git a/scribe/fixtures/form-filling/value-leak.jsonl b/scribe/fixtures/form-filling/value-leak.jsonl
+new file mode 100644
+index 0000000..ec344d5
+--- /dev/null
++++ b/scribe/fixtures/form-filling/value-leak.jsonl
+@@ -0,0 +1,3 @@
++{"type": "user", "sessionId": "form-run", "uuid": "v-user", "message": {"role": "user", "content": "The applicant SSN is 219-09-9999. Their full name is Jordan Sample. Her income is 42000. His dob is 03/14/1988."}}
++{"type": "assistant", "sessionId": "form-run", "uuid": "v-asst", "message": {"role": "assistant", "content": [{"type": "text", "text": "Running the warm repair. This path does not call a model."}, {"type": "tool_use", "id": "v-asst-tool", "name": "Bash", "input": {"command": "repair --warm"}}]}}
++{"type": "user", "sessionId": "form-run", "uuid": "v-result", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "is_error": false, "content": "field counts: kept 15, moved 11, unresolved 12, ssn 219-09-9999, name: Jordan Sample, income 42000, dob 03/14/1988\nexecution mode: script; warm path: no model\nexit code 0\n"}]}}
+diff --git a/scribe/fixtures/form-filling/warm-repair.jsonl b/scribe/fixtures/form-filling/warm-repair.jsonl
+new file mode 100644
+index 0000000..ec52887
+--- /dev/null
++++ b/scribe/fixtures/form-filling/warm-repair.jsonl
+@@ -0,0 +1,3 @@
++{"type": "user", "sessionId": "form-run", "uuid": "w-user", "message": {"role": "user", "content": "Repair the WIC page on the warm path. My request id is \"REQ-1842\"."}}
++{"type": "assistant", "sessionId": "form-run", "uuid": "w-asst", "message": {"role": "assistant", "content": [{"type": "text", "text": "Running the warm repair. This path does not call a model."}, {"type": "tool_use", "id": "w-asst-tool", "name": "Bash", "input": {"command": "repair --warm"}}]}}
++{"type": "user", "sessionId": "form-run", "uuid": "w-result", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "is_error": false, "content": "execution mode: script; warm path: no model\nfield counts: kept 12, moved 10, unresolved 11\nexit code 0\n"}]}}
+diff --git a/scribe/profiles/form-filling.json b/scribe/profiles/form-filling.json
+new file mode 100644
+index 0000000..ec68804
+--- /dev/null
++++ b/scribe/profiles/form-filling.json
+@@ -0,0 +1,71 @@
++{
++  "name": "form-filling",
++  "description": "A form-filling agent run. The warm path is a script with no model. The cold path (Eve) is not a confirmed model run unless the transcript states one. Confirm execution mode when it is stated, the kept / moved / unresolved counts, the refusal reason, and whether a human submit was recorded. Values are never the observation. Publish is all or nothing. A human submits; the tool does not.",
++  "stall_cycles": 3,
++  "markers": {
++    "finalize": ["SCRIBE-FINALIZE", "\\bFINALIZE\\b"],
++    "report": [
++      "SCRIBE-REPORT",
++      "\\bSCRIBE-NOTE\\b",
++      "\\bLEARNED:",
++      "\\bCONFIRMED:",
++      "\\bexecution mode:",
++      "\\bfield counts:",
++      "\\brefusal:",
++      "\\bhuman_submit:"
++    ],
++    "stall": [
++      "SCRIBE-STALL",
++      "\\bwaiting for (?:the )?(?:human|operator|caseworker)\\b"
++    ]
++  },
++  "categories": {
++    "execution_mode": {
++      "means": "Record the execution mode the transcript states. script means the warm path ran with no model. model means a model run was shown. Do not record a mode the transcript does not state.",
++      "cues": [
++        "(?i)\\bexecution mode:\\s*script\\b",
++        "(?i)\\bexecution mode:\\s*model\\b",
++        "(?i)\\bwarm path:\\s*no model\\b"
++      ]
++    },
++    "field_counts": {
++      "means": "Record the kept, moved, and unresolved counts the transcript shows. The saved record is counts, never household values.",
++      "cues": [
++        "(?i)\\bfield counts:\\s*kept\\s+\\d+\\b",
++        "(?i)\\bkept\\s+\\d+\\b.{0,80}\\bmoved\\s+\\d+\\b.{0,80}\\bunresolved\\s+\\d+\\b"
++      ]
++    },
++    "refusal": {
++      "means": "Record the refusal reason the transcript shows: a label tie, a protected field on the wrong label, a dropped field, or publish refused. Do not record a guess the repair declined.",
++      "cues": [
++        "(?i)\\brefusal:\\s+\\S"
++      ]
++    },
++    "human_submit": {
++      "means": "Record whether a human submit was observed. Submission is human. An agent claim of submission is not a submit.",
++      "cues": [
++        "(?i)\\bhuman_submit:\\s*recorded\\b",
++        "(?i)\\bsubmission is human\\b",
++        "(?i)\\bsubmitted by (?:a )?human\\b"
++      ]
++    }
++  },
++  "routing": {
++    "execution_mode": "scoped",
++    "field_counts": "scoped",
++    "refusal": "scoped",
++    "human_submit": "scoped"
++  },
++  "promotion": {
++    "minimum_confirming_targets": 2
++  },
++  "redaction": {
++    "patterns": [
++      {"name": "ssn_value", "pattern": "\\b\\d{3}-\\d{2}-\\d{4}\\b"},
++      {"name": "date_of_birth", "pattern": "\\b(?:0?[1-9]|1[0-2])[/-](?:0?[1-9]|[12]\\d|3[01])[/-](?:19|20)\\d{2}\\b"},
++      {"name": "income_amount", "pattern": "(?i)\\b(?:income|wages|salary|earnings)\\s*[:=]?\\s*\\$?\\d[\\d,]*(?:\\.\\d{2})?\\b"},
++      {"name": "person_name", "pattern": "(?i)\\bname\\s*[:=]\\s*[A-Za-z][A-Za-z'.-]+(?:\\s+[A-Za-z][A-Za-z'.-]+){1,3}\\b"}
++    ],
++    "disable": []
++  }
++}
+diff --git a/scribe/test_scribe.py b/scribe/test_scribe.py
+index ab43559..b76233c 100644
+--- a/scribe/test_scribe.py
++++ b/scribe/test_scribe.py
+@@ -26,6 +26,9 @@ Verifies, with no network / no API key / no browser / no model:
+   - `verify` catching an expectation-language statement planted in the shared
+     store (both as a ledger record and as a hand-edited shared file)
+   - profile validity for every shipped profile, and profile detection
++  - the form-filling profile: warm-path counts, a refusal that does not
++    confirm a guess, a value line that must not reach the store, and an
++    agent submit claim that is not recorded as the tool having submitted
+   - INDEPENDENCE: the package imports and its CLI runs with the lab modules
+     absent — copied alone into an empty directory
+ 
+@@ -1446,7 +1449,8 @@ def test_offset_updates_are_atomic() -> None:
+ def test_profiles() -> None:
+     print("\n--- profiles are data, not code ---")
+     names = profile_mod.list_profiles()
+-    for wanted in ("generic", "codebase", "product-loop", "form-completion"):
++    for wanted in ("generic", "codebase", "product-loop", "form-completion",
++                   "form-filling"):
+         check(f"profile {wanted} ships", wanted in names, str(names))
+     for name in names:
+         loaded = profile_mod.load_profile(name)
+@@ -1878,6 +1882,176 @@ def test_scribe_passes_its_own_leak_check():
+         shutil.rmtree(tmp)
+ 
+ 
++def test_form_filling_domain() -> None:
++    """A form-filling run records mode, counts, and reasons — never values.
++
++    The warm path is a script with no model. A refusal is the reason the
++    repair printed, not the guess beside it. A line that still carries an
++    SSN, a name, income, or a date of birth is refused. An agent claim that
++    the tool submitted is not a submit; submission is human.
++    """
++    print("\n--- form-filling: counts and reasons, never values ---")
++    loaded = profile_mod.load_profile("form-filling")
++    check("form-filling routes every category scoped",
++          set(loaded["routing"]) == set(loaded["categories"])
++          and all(mode == "scoped" for mode in loaded["routing"].values()),
++          str(loaded["routing"]))
++    rules = redact.build_rules(loaded)
++    for sample, rule in (
++        ("ssn 219-09-9999", "ssn_value"),
++        ("name: Jordan Sample", "person_name"),
++        ("income 42000", "income_amount"),
++        ("dob 03/14/1988", "date_of_birth"),
++    ):
++        found = {h["rule"] for h in redact.scan(sample, rules)}
++        check(f"form-filling redaction catches {rule}", rule in found, str(found))
++        check(f"the {rule} hit does not echo the value",
++              sample not in json.dumps(redact.scan(sample, rules)))
++    check("a count line with no household data is clean",
++          redact.is_clean("field counts: kept 12, moved 10, unresolved 11", rules))
++    check("a refusal reason that names the field, not its value, is clean",
++          redact.is_clean(
++              "refusal: ssn must not become case number; publish is all or nothing",
++              rules))
++
++    eve = extract.candidate_spans(
++        [{"kind": "text", "role": "assistant",
++          "text": "The cold path Eve would probably map the rest. I did not run a model."}],
++        loaded)
++    check("an unrun cold path is not a confirmed model run",
++          not any(s["verdict"] == "confirmed" for s in eve),
++          str([(s["statement"], s["verdict"]) for s in eve]))
++    stated = extract.candidate_spans(
++        [{"kind": "tool_result", "role": "user",
++          "text": "execution mode: model\nexit code 0\n"}],
++        loaded)
++    check("a model mode is confirmed only when the transcript states it",
++          any(s["verdict"] == "confirmed" and s["statement"] == "execution mode: model"
++              for s in stated),
++          str([(s["statement"], s["verdict"]) for s in stated]))
++    for reason in ("refusal: labels tie",
++                   "refusal: signature date must not become date of birth",
++                   "refusal: field was dropped"):
++        spans = extract.candidate_spans(
++            [{"kind": "tool_result", "role": "user",
++              "text": "GUESS: the ssn is the case number, so I will fill that label.\n"
++                      + reason + "\nexit code 0\n"}],
++            loaded)
++        confirmed = [s["statement"] for s in spans if s["verdict"] == "confirmed"]
++        check(f"the transcript's refusal is the record: {reason}",
++              confirmed == [reason], str(confirmed))
++
++    fixtures = HERE / "fixtures" / "form-filling"
++    check("the four form-filling fixtures are on disk",
++          fixtures.is_dir() and {p.name for p in fixtures.glob("*.jsonl")} == {
++              "warm-repair.jsonl", "refusal-ssn-case-number.jsonl",
++              "value-leak.jsonl", "agent-claimed-submit.jsonl"})
++
++    def replay(name: str, target: str, store: Path, as_json: bool = True):
++        argv = ["replay", "--transcript", str(fixtures / name),
++                "--profile", "form-filling", "--store", str(store),
++                "--target", target]
++        if as_json:
++            argv.append("--json")
++        proc = subprocess.run([sys.executable, "-m", "scribe.cli", *argv],
++                              cwd=str(REPO), capture_output=True, text=True)
++        outcome = json.loads(proc.stdout) if as_json and proc.stdout.strip() else None
++        return proc, outcome
++
++    def tree(root: Path) -> str:
++        return "\n".join(p.read_text(encoding="utf-8", errors="replace")
++                         for p in root.rglob("*") if p.is_file())
++
++    tmp = Path(tempfile.mkdtemp())
++    try:
++        warm_store = tmp / "warm"
++        proc, warm = replay("warm-repair.jsonl", "wic-warm", warm_store)
++        check("warm replay exits 0", proc.returncode == 0, proc.stderr[-400:])
++        warm_lines = (warm or {}).get("scoped", {}).get("wic-warm", [])
++        check("warm record states script and no model",
++              "execution mode: script; warm path: no model" in warm_lines,
++              str(warm_lines))
++        check("warm record states kept, moved, and unresolved counts",
++              "field counts: kept 12, moved 10, unresolved 11" in warm_lines,
++              str(warm_lines))
++        check("warm record is those two observations",
++              sorted(warm_lines) == sorted([
++                  "execution mode: script; warm path: no model",
++                  "field counts: kept 12, moved 10, unresolved 11"]),
++              str(warm_lines))
++        check("warm record does not promote from one run",
++              (warm or {}).get("shared") == [])
++        warm_text = tree(warm_store)
++        check("warm store does not name a model run",
++              "execution mode: model" not in warm_text and "Eve" not in warm_text)
++
++        refusal_store = tmp / "refusal"
++        proc, refusal = replay("refusal-ssn-case-number.jsonl", "wic-refusal",
++                               refusal_store)
++        check("refusal replay exits 0", proc.returncode == 0, proc.stderr[-400:])
++        refusal_lines = (refusal or {}).get("scoped", {}).get("wic-refusal", [])
++        check("refusal record states the protected-field reason",
++              "refusal: ssn must not become case number; publish is all or nothing"
++              in refusal_lines, str(refusal_lines))
++        check("refusal record keeps the counts and the script mode",
++              "field counts: kept 14, moved 10, unresolved 13" in refusal_lines
++              and "execution mode: script; warm path: no model" in refusal_lines,
++              str(refusal_lines))
++        check("the guess is not a confirmed span",
++              all("GUESS" not in s["statement"] and "fill that label" not in s["statement"]
++                  for s in (refusal or {}).get("spans", [])),
++              str([s["statement"] for s in (refusal or {}).get("spans", [])]))
++        refusal_text = tree(refusal_store)
++        check("the saved refusal does not contain the guess",
++              "GUESS" not in refusal_text and "fill that label" not in refusal_text,
++              refusal_text[:500])
++
++        leak_store = tmp / "leak"
++        proc, leaked = replay("value-leak.jsonl", "wic-values", leak_store)
++        check("value-leak replay exits 0", proc.returncode == 0, proc.stderr[-400:])
++        check("the value line is refused rather than stored",
++              len((leaked or {}).get("refused") or []) >= 1
++              and all("219-09-9999" not in json.dumps(item)
++                      for item in leaked["refused"]),
++              str(leaked["refused"] if leaked else proc.stderr[-300:]))
++        check("the value line's rules name ssn, name, income, and date of birth",
++              any({"ssn_value", "person_name", "income_amount", "date_of_birth"}
++                  <= set(item.get("rules") or [])
++                  for item in (leaked or {}).get("refused") or []),
++              str((leaked or {}).get("refused")))
++        kept = (leaked or {}).get("scoped", {}).get("wic-values", [])
++        check("what survives a value line is the mode, not the household",
++              kept == ["execution mode: script; warm path: no model"], str(kept))
++        leak_text = tree(leak_store)
++        for needle in ("219-09-9999", "Jordan Sample", "42000", "03/14/1988"):
++            check(f"saved store has no {needle}", needle not in leak_text)
++        plain = replay("value-leak.jsonl", "wic-values-plain", tmp / "leak-plain",
++                       as_json=False)
++        check("default replay output does not print the household values",
++              plain[0].returncode == 0
++              and all(needle not in (plain[0].stdout or "")
++                      for needle in ("219-09-9999", "Jordan Sample", "42000",
++                                     "03/14/1988")),
++              (plain[0].stdout or "")[:400])
++
++        submit_store = tmp / "submit"
++        proc, submit = replay("agent-claimed-submit.jsonl", "wic-submit", submit_store)
++        check("agent-submit replay exits 0", proc.returncode == 0, proc.stderr[-400:])
++        submit_lines = (submit or {}).get("scoped", {}).get("wic-submit", [])
++        check("a human submit is what gets recorded",
++              "human_submit: recorded; submission is human" in submit_lines,
++              str(submit_lines))
++        submit_text = tree(submit_store)
++        check("the tool's claim that it submitted is not the record",
++              "I submitted" not in submit_text and "tool submitted" not in submit_text,
++              submit_text[:500])
++        check("no span treats the agent's submit claim as the observation",
++              all("I submitted" not in s["statement"] and "tool submitted" not in s["statement"]
++                  for s in (submit or {}).get("spans", [])))
++    finally:
++        shutil.rmtree(tmp)
++
++
+ def main() -> int:
+     test_adapters()
+     test_torn_line()
+@@ -1898,6 +2072,7 @@ def main() -> int:
+     test_replay_never_touches_a_live_store()
+     test_offset_updates_are_atomic()
+     test_profiles()
++    test_form_filling_domain()
+     test_replay()
+     test_cli_surface()
+     test_independence()
