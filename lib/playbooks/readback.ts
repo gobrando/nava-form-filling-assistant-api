@@ -45,13 +45,13 @@ const EXPECTED_LENGTH: Record<string, number> = {
   incorporationDate: 10,
 };
 
-const MASK_TYPES = new Set(['password', 'date']);
+const MASK_TYPES = new Set(['password']);
 
 export function readbackChecklist(
   source: RepairProposal | readonly FieldMapEntry[],
   controls: readonly ReadbackControl[],
 ): ReadbackObligation[] {
-  const fieldMap = Array.isArray(source) ? source : source.fieldMap;
+  const fieldMap = 'fieldMap' in source ? source.fieldMap : source;
   const bySelector = new Map(controls.map((control) => [control.selector, control]));
   const obligations: ReadbackObligation[] = [];
 
@@ -89,13 +89,11 @@ function truncates(entry: FieldMapEntry, control: ReadbackControl): boolean {
 function masks(entry: FieldMapEntry, control: ReadbackControl): boolean {
   if (entry.mask && entry.mask.trim().length > 0) return true;
   if (entry.method === 'keys') return true;
-  if (entry.inputType === 'date') return true;
   return MASK_TYPES.has(control.type.toLowerCase());
 }
 
 function expectedLength(entry: FieldMapEntry): number | null {
   if (entry.mask && entry.mask.trim().length > 0) return entry.mask.trim().length;
-  if (entry.inputType === 'date') return 10;
   if (entry.purpose && EXPECTED_LENGTH[entry.purpose] !== undefined) {
     return EXPECTED_LENGTH[entry.purpose];
   }

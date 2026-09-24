@@ -89,6 +89,14 @@ describe('a masked Social Security box', () => {
     expect(JSON.stringify(list)).not.toMatch(/\d{3}-\d{2}-\d{4}/);
   });
 
+  it('does not list an ordinary date picker', () => {
+    const list = readbackChecklist(
+      [{ fieldKey: '#applicant-dob', purpose: 'dateOfBirth', inputType: 'date' }],
+      [{ selector: '#applicant-dob', label: 'Date of birth', type: 'date', count: 1 }],
+    );
+    expect(list).toEqual([]);
+  });
+
   it('lists a mask that the field map already recorded', () => {
     const list = readbackChecklist(
       [

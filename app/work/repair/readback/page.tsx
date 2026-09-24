@@ -49,7 +49,9 @@ export default async function ReadbackPage({
             return (
               <section key={section.reason}>
                 <h2>{section.heading}</h2>
-                {items.length === 0 ? <p>None on this form.</p> : null}
+                {items.length === 0 ? (
+                  <p>None on this form. Read every write back anyway.</p>
+                ) : null}
                 {items.map((item) => (
                   <div className="question" key={item.fieldKey}>
                     <span className="label">{item.label}</span>
