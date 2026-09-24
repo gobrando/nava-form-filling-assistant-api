@@ -82,6 +82,11 @@ export default async function WorkPage({
         without a model. <a href="/work/repair">Review that repair</a>.
       </p>
 
+      <p className="footnote">
+        <a href="/work/playbooks">Playbook versions</a> for this organization are listed apart from
+        this packet.
+      </p>
+
       <p className="notice">
         The last measured decision pass, on a 26-control page, cost $0.000310. This packet uses that
         split: nine fields from the record, questions for the client, and identifiers left blank.

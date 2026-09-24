@@ -99,6 +99,29 @@ describe('openapi.yaml matches the implementation', () => {
     expect(described).toContain('Readback is still required for anything that does get filled.');
   });
 
+  it('documents playbook history as counts and field keys', () => {
+    const operation = spec.paths['/v1/programs/{slug}/playbook/history']?.get;
+    expect(operation).toBeDefined();
+    const history = spec.components.schemas.PlaybookHistory;
+    const version = spec.components.schemas.PlaybookVersionSummary;
+    expect(history?.additionalProperties).toBe(false);
+    expect(version?.additionalProperties).toBe(false);
+    expect(Object.keys(version.properties).sort()).toEqual([
+      'createdAt',
+      'fieldCount',
+      'fieldKeys',
+      'fromRepair',
+      'id',
+      'preferred',
+      'scope',
+      'version',
+    ]);
+    const described = JSON.stringify(version.properties);
+    expect(described).not.toContain('purpose');
+    expect(described).not.toContain('note');
+    expect(described).not.toContain('"value"');
+  });
+
   it('never describes a submit operation that submits', () => {
     const submit = spec.paths['/v1/applications/{id}/submit']?.post;
     expect(submit).toBeDefined();

@@ -1308,6 +1308,31 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /v1/programs/{slug}/playbook/history:
+    get:
+      tags: [Catalog]
+      summary: Playbook versions for this tenant
+      description: |
+        Shared versions and this tenant's overrides. Another tenant's overrides
+        are absent. `preferred` is the version the next run would use: this
+        tenant's highest version, otherwise the shared row.
+
+        Counts and field keys only. Household values are not included. A repair
+        is a new tenant version; the shared playbook is not edited.
+      parameters: [{ $ref: '#/components/parameters/programSlug' }]
+      responses:
+        '200':
+          description: The version summary for the authenticated tenant.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  history: { $ref: '#/components/schemas/PlaybookHistory' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
 components:
   securitySchemes:
     bearerKey:
@@ -1617,6 +1642,53 @@ components:
             keys: fieldCount, gapCount, verifiedCount, blockedCount, pageCount,
             checkpointKind, resumeOutcome, fromStatus, toStatus, outcomeStatus.
           additionalProperties: { oneOf: [{ type: integer }, { type: string }] }
+
+    PlaybookHistory:
+      type: object
+      additionalProperties: false
+      required: [programId, versions]
+      description: |
+        Counts and field keys for the shared versions and this tenant's
+        overrides. Household values are not included.
+      properties:
+        programId: { type: string }
+        versions:
+          type: array
+          items: { $ref: '#/components/schemas/PlaybookVersionSummary' }
+
+    PlaybookVersionSummary:
+      type: object
+      additionalProperties: false
+      required: [id, version, scope, createdAt, fieldCount, fieldKeys, fromRepair, preferred]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The playbook version id.
+        version: { type: integer }
+        scope:
+          type: string
+          enum: [shared, tenant]
+          description: |
+            `shared` is readable by every tenant. `tenant` belongs to the
+            caller. Another tenant does not inherit it.
+        createdAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the version was stored, if that time is present.
+        fieldCount: { type: integer, minimum: 0 }
+        fieldKeys:
+          type: array
+          items: { type: string }
+        fromRepair:
+          type: boolean
+          description: |
+            True when the deterministic scribe published this version.
+        preferred:
+          type: boolean
+          description: |
+            True for the version this tenant would run.
 
   responses:
     BadRequest:
