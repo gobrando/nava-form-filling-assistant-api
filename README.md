@@ -362,6 +362,11 @@ prints a scorecard and writes
 which refusals still belong to the model scribe, and what a green row does not
 prove (readback, no submit, all-or-nothing publish).
 
+`pnpm review-brief` writes [`reports/repair-review.md`](reports/repair-review.md)
+for a design review. Cost assumptions live in
+[`config/review-brief.json`](config/review-brief.json). The fixture share is
+this lab, not a production rate.
+
 ## What is and isn't proven
 
 | | Status |
