@@ -30,6 +30,7 @@
     "compare:ihss": "tsx --env-file-if-exists=.env.local scripts/compare-ihss.ts",
     "rehearse": "tsx scripts/rehearse-scribe.ts",
     "drift": "tsx scripts/drift-scribe.ts",
+    "review-brief": "tsx scripts/review-brief.ts",
     "apricot": "tsx --env-file-if-exists=.env.local scripts/apricot-status.ts"
   },
   "dependencies": {

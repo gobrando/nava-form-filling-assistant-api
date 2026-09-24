@@ -1,0 +1,7 @@
+{
+  "pricePerModelTurnUsd": "0.09",
+  "turnsPerColdRun": 10,
+  "publishedFixtures": 5,
+  "fixtureCount": 9,
+  "note": "Assumptions for this lab only. The fixture share is not a county rate and not a production rate."
+}
