@@ -184,42 +184,14 @@ export async function POST(request: Request) {
               : 'No playbook for this site.',
           };
 
-    const [row] = await tx
-      .insert(application)
-      .values({
-        tenantId: auth.tenantId,
-        householdId: body.householdId,
-        programIds: workflow.programIds,
-        workflowId: workflow.workflowId,
-        name: workflow.name,
-        status: 'ready_to_fill',
-        playbookId: playbook?.id ?? null,
-        playbookVersion: playbook?.version ?? null,
-        executionMode: verdict.executionMode,
-        location: workflow.url,
-        ownerPrincipal: auth.principalId,
-      })
-      .returning();
-
-    await recordAudit(tx, {
-      tenantId: auth.tenantId,
-      type: 'application_added',
-      principalId: auth.principalId,
-      applicationId: row.id,
-      outcome: verdict.executionMode,
-    });
-
-    if (body.questions?.length) {
-      await reportGaps(tx, auth.tenantId, row.id, body.questions);
-    }
-
     let activePlaybook = playbook;
     let activeVerdict = verdict;
     let repairSummary: ReturnType<typeof proposeRepair> | null = null;
 
     // A cold start can still avoid a model when the caller shows the page and
     // every previous field has one unambiguous control. The shared playbook
-    // stays put; the override is this tenant's.
+    // stays put; the override is this tenant's. This happens before the
+    // application row is written so the audit records the path that ran.
     if (!verdict.passed && body.repair && body.observed && playbook) {
       const proposal = proposeRepair(playbook, body.observed);
       repairSummary = proposal;
@@ -239,17 +211,37 @@ export async function POST(request: Request) {
         if (repaired.passed) {
           activePlaybook = published.row;
           activeVerdict = repaired;
-          await tx
-            .update(application)
-            .set({
-              executionMode: 'script',
-              playbookId: published.row.id,
-              playbookVersion: published.row.version,
-              updatedAt: new Date(),
-            })
-            .where(eq(application.id, row.id));
         }
       }
+    }
+
+    const [row] = await tx
+      .insert(application)
+      .values({
+        tenantId: auth.tenantId,
+        householdId: body.householdId,
+        programIds: workflow.programIds,
+        workflowId: workflow.workflowId,
+        name: workflow.name,
+        status: 'ready_to_fill',
+        playbookId: activePlaybook?.id ?? null,
+        playbookVersion: activePlaybook?.version ?? null,
+        executionMode: activeVerdict.executionMode,
+        location: workflow.url,
+        ownerPrincipal: auth.principalId,
+      })
+      .returning();
+
+    await recordAudit(tx, {
+      tenantId: auth.tenantId,
+      type: 'application_added',
+      principalId: auth.principalId,
+      applicationId: row.id,
+      outcome: activeVerdict.executionMode,
+    });
+
+    if (body.questions?.length) {
+      await reportGaps(tx, auth.tenantId, row.id, body.questions);
     }
 
     // --- Warm path: deterministic, no model ---------------------------------
