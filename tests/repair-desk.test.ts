@@ -47,6 +47,8 @@ describe('the open form', () => {
       ['Preferred language', '#edit-preferred-language', '#applicant-language'],
     ]);
     expect(desk.refused).toHaveLength(0);
+    expect(desk.modelRequired).toBe(false);
+    expect(desk.modelFields).toEqual([]);
     expect(desk.unmapped.map((item) => item.label)).toEqual(['Case number']);
     expect(desk.proposal?.fieldMap.some((entry) => entry.fieldKey === '#case-number')).toBe(false);
   });
@@ -99,6 +101,18 @@ describe('the open form', () => {
     ]);
     expect(desk.proposal?.fieldMap.some((entry) => entry.fieldKey === '#case-number')).toBe(false);
     expect(desk.readback).toBeNull();
+    expect(desk.modelRequired).toBe(true);
+    expect(desk.modelFields.map((item) => [item.label, item.sentence])).toEqual([
+      [
+        'Childcare',
+        'tie. "Childcare" (#childcare-one, count 1) and "Childcare" (#childcare-two, count 1).',
+      ],
+      [
+        'Social Security Number',
+        'protected field would land on the wrong label. "Case number" (#case-number, count 1) and "Medi-Cal number" (#medi-cal-number, count 1) do not name it.',
+      ],
+      ['Unemployment benefits', 'label missing. No label on this page names it.'],
+    ]);
   });
 });
 
@@ -152,6 +166,15 @@ describe('values stay off the desk', () => {
     expect(wic).toContain('#applicant-zip');
     expect(wic).toContain('does not skip readback');
     expect(wic).toContain('Publish this repair for the demo organization');
+    expect(wic).toContain('A model would still have to decide');
+    expect(wic).toContain('The model is not required for the map.');
+    expect(ihss).toContain('A model would still have to decide');
+    expect(ihss).not.toContain('The model is not required for the map.');
+    expect(ihss).toContain('#childcare-one');
+    expect(ihss).toContain('#childcare-two');
+    expect(ihss).toContain('protected field would land on the wrong label');
+    expect(ihss).toContain('Do not infer protected fields.');
+    expect(ihss).toContain('Do not submit.');
     expect(ihss).toContain('will not guess which one');
     expect(ihss).toContain('does not name this protected field');
     expect(ihss).toContain('No label on this page names it');

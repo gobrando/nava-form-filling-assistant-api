@@ -1,6 +1,7 @@
 import { withTenant } from '@/lib/db';
 import { guard } from '@/lib/guard';
 import { fail, ok, preflight, readJson } from '@/lib/http';
+import { briefForDryRun } from '@/lib/playbooks/refusal-brief';
 import { publicPlaybook, resolvePlaybookForProgram } from '@/lib/playbooks/registry';
 import { observedControlSchema, proposeRepair, publishRepair } from '@/lib/playbooks/scribe';
 import { programDefinition } from '@/lib/vocabulary';
@@ -14,8 +15,10 @@ import { z } from 'zod';
  * playbook the next warm run can trust, or it refuses and names the fields it
  * would not guess.
  *
- * `publish: false` (the default) is a dry run. Publishing does not edit the
- * shared playbook, and it does not start a model.
+ * `publish: false` (the default) is a dry run. When the proposal is refused,
+ * the dry run includes a refusal brief: unresolved fields, colliding labels,
+ * and unmapped controls. Counts, field keys, and labels only. Publishing does
+ * not edit the shared playbook, and it does not start a model.
  */
 
 const bodySchema = z
@@ -55,7 +58,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
 
     const proposal = proposeRepair(previous, parsed.data.observed);
     if (!parsed.data.publish) {
-      return ok({ proposal: proposalBody(proposal), published: null }, { origin });
+      const brief = briefForDryRun(proposal, parsed.data.observed);
+      return ok(
+        {
+          proposal: proposalBody(proposal),
+          published: null,
+          ...(brief ? { brief } : {}),
+        },
+        { origin },
+      );
     }
     if (!proposal.publishable) {
       return fail(409, proposal.refused ?? 'This repair is not safe to publish.', { origin });
