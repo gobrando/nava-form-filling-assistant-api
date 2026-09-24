@@ -709,6 +709,172 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: The gate refused. Blockers are listed in `error`. }
 
+  /v1/applications/{id}/outcomes:
+    get:
+      tags: [Review]
+      summary: Read the post-submit outcome history
+      description: |
+        What happened after a person submitted: received, waiting on documents,
+        approved, denied, or the benefit started. Empty until a submission is
+        recorded.
+      parameters: [{ $ref: '#/components/parameters/uuidId' }]
+      responses:
+        '200': { description: History, oldest first, plus the current status. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Review]
+      summary: Record the next outcome
+      description: |
+        Append-only. A denial or a document request requires a reason code.
+        `followUp` is shown to the participant and is not written to the audit
+        trail. The audit event records the status only.
+      parameters: [{ $ref: '#/components/parameters/uuidId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status, recordedBy]
+              additionalProperties: false
+              properties:
+                status:
+                  type: string
+                  enum: [received, pending_documents, approved, denied, benefit_received]
+                reasonCode:
+                  type: string
+                  enum:
+                    - missing_documents
+                    - ineligible_income
+                    - ineligible_residency
+                    - ineligible_household
+                    - duplicate_application
+                    - withdrawn
+                    - identity_not_verified
+                    - other
+                followUp: { type: string, maxLength: 280 }
+                recordedBy: { type: string, maxLength: 200 }
+      responses:
+        '201': { description: Outcome recorded. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: The application was not submitted, or this move is not allowed. }
+
+  /v1/applications/{id}/share:
+    post:
+      tags: [Completion]
+      summary: Mint a participant link
+      description: |
+        Returns a URL the participant can open to review masked facts and answer
+        open questions. The token is shown once. The page has no way to submit.
+      parameters: [{ $ref: '#/components/parameters/uuidId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [createdBy]
+              additionalProperties: false
+              properties:
+                createdBy: { type: string, maxLength: 200 }
+                expiresInHours: { type: integer, minimum: 1, maximum: 720 }
+      responses:
+        '201': { description: Link minted. `url` contains the token. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/participate/{token}:
+    get:
+      tags: [Completion]
+      summary: Participant view of one shared application
+      security: []
+      description: |
+        No API key. The token is the credential. Facts are masked. `canSubmit`
+        is always false.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Masked facts, open questions, and the latest outcome. }
+        '404': { description: Unknown, expired, or revoked link. }
+    post:
+      tags: [Completion]
+      summary: Save participant answers
+      security: []
+      description: |
+        Answers become facts sourced `participant`. This does not submit.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [answers]
+              additionalProperties: false
+              properties:
+                answers:
+                  type: array
+                  items:
+                    type: object
+                    required: [gapId, value]
+                    additionalProperties: false
+                    properties:
+                      gapId: { type: string, format: uuid }
+                      value: { type: string, maxLength: 500 }
+      responses:
+        '200': { description: Answers stored. HTML form posts redirect back to the page. }
+        '404': { description: Unknown, expired, or revoked link. }
+
+  /v1/plan:
+    post:
+      tags: [Completion]
+      summary: Run the shared field-mapping planner
+      description: |
+        The same three roles the Chrome extension runs on-device (field mapper,
+        gap analyst, independent reviewer), hosted so both surfaces share one
+        engine. The body is a redacted field inventory and the names of
+        available sources. A `value` property is rejected. The extension
+        validates the plan again before any DOM write.
+
+        `model` is one of the five-model comparison set: `claude-opus-4-7`,
+        `claude-opus-4-8`, `claude-sonnet-4-6`, `gpt-5.1`, `gpt-5-mini`.
+        The default is `claude-sonnet-4-6`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [page, fields, sources]
+              additionalProperties: false
+              properties:
+                model: { type: string }
+                page:
+                  type: object
+                  required: [domain]
+                  additionalProperties: false
+                  properties:
+                    domain: { type: string, maxLength: 160 }
+                fields:
+                  type: array
+                  maxItems: 80
+                sources:
+                  type: array
+                  maxItems: 80
+      responses:
+        '200': { description: A validated plan. No form values were written. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503': { description: That model's provider key is not configured. }
+
   # ---------------------------------------------------------------------------
   # Work queue
   # ---------------------------------------------------------------------------
@@ -1200,6 +1366,7 @@ components:
             - source_reloaded
             - session_ended
             - audit_exported
+            - outcome_recorded
         principalId: { type: string }
         applicationId: { type: string, format: uuid, nullable: true }
         connectionId: { type: string, nullable: true }
@@ -1210,7 +1377,7 @@ components:
           description: |
             Counts and status enums only, enforced by a CHECK constraint. Allowed
             keys: fieldCount, gapCount, verifiedCount, blockedCount, pageCount,
-            checkpointKind, resumeOutcome, fromStatus, toStatus.
+            checkpointKind, resumeOutcome, fromStatus, toStatus, outcomeStatus.
           additionalProperties: { oneOf: [{ type: integer }, { type: string }] }
 
   responses:
