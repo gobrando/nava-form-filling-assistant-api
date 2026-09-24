@@ -1,0 +1,47 @@
+<!doctype html>
+<!--
+  Hearth County benefits application.
+
+  Language, street, ZIP, and date of birth kept their selectors. The SSN
+  id changed. The visible label is still Social Security Number, so the
+  field may move. Case number sits beside it and must stay unmapped.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Hearth County benefits application</title>
+  </head>
+  <body>
+    <h1>Apply for benefits — Hearth County</h1>
+    <p>
+      One application can request food assistance and medical coverage.
+      Enter each number in its own box. A case number is not a Social
+      Security Number.
+    </p>
+    <form id="benefits-application">
+      <label for="primarylang">Primary language</label>
+      <select id="primarylang" name="language">
+        <option value="">- Select -</option>
+        <option>English</option>
+        <option>Spanish</option>
+      </select>
+
+      <label for="addressLine1">Street address</label>
+      <input id="addressLine1" name="address" type="text" required />
+
+      <label for="zip5">ZIP code</label>
+      <input id="zip5" name="zip" type="text" required />
+
+      <label for="birthDate_primary_input">Date of birth</label>
+      <input id="birthDate_primary_input" name="birth_date" type="date" required />
+
+      <label for="applicant-ssn">Social Security Number</label>
+      <input id="applicant-ssn" name="ssn" type="text" required />
+
+      <label for="case-number">Case number</label>
+      <input id="case-number" name="case_number" type="text" />
+
+      <button id="submit-application" type="submit">Submit</button>
+    </form>
+  </body>
+</html>

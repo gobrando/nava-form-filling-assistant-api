@@ -1,0 +1,56 @@
+<!doctype html>
+<!--
+  Saltmere County WIC, after a redesign.
+
+  The questions are the ones on the served WIC playbook. The ids moved,
+  except email, which still uses #edit-email. #case-number is a decoy: a
+  repair that lands a name or a ZIP on it has guessed. Clinic options are
+  fictional. The ZIP maxlength is short on purpose; a repaired map still
+  needs a readback.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Saltmere County WIC application</title>
+  </head>
+  <body>
+    <h1>Apply for WIC in Saltmere County</h1>
+    <p>
+      Women, Infants, and Children. Bring proof of address to the clinic you
+      pick. This page does not submit the application.
+    </p>
+    <form id="wic-application">
+      <label for="saltmere-name">Name</label>
+      <input id="saltmere-name" name="name" type="text" required />
+
+      <label for="saltmere-phone">Phone</label>
+      <input id="saltmere-phone" name="phone" type="tel" />
+
+      <label for="edit-email">Email</label>
+      <input id="edit-email" name="email" type="email" />
+
+      <label for="saltmere-zip">ZIP code</label>
+      <input id="saltmere-zip" name="zip" type="text" maxlength="5" />
+
+      <label for="saltmere-language">Preferred language</label>
+      <select id="saltmere-language" name="preferred_language">
+        <option value="">- Select -</option>
+        <option>English</option>
+        <option>Spanish</option>
+      </select>
+
+      <label for="saltmere-clinic">Please choose the WIC clinic closest to you</label>
+      <select id="saltmere-clinic" name="clinic" required>
+        <option value="">- Select -</option>
+        <option>Saltmere County WIC</option>
+        <option>North Pier WIC</option>
+      </select>
+
+      <label for="case-number">Case number</label>
+      <input id="case-number" name="case_number" type="text" />
+
+      <div id="captcha-gate">Verify you are human</div>
+      <button id="submit-application" type="submit">Submit</button>
+    </form>
+  </body>
+</html>

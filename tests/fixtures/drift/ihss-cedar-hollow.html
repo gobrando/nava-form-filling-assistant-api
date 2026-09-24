@@ -1,0 +1,41 @@
+<!doctype html>
+<!--
+  Cedar Hollow County IHSS intake, after the ids were renamed.
+
+  The served IHSS playbook places first name (#firstNameTxt) and Social
+  Security Number (#ssnTxt). Those labels are unchanged. Date of birth is
+  on the page and is not in that playbook, so it stays unmapped. The
+  signature date must not be published as a birth date. Case number is a
+  nearby identifier the SSN must not inherit.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Cedar Hollow County IHSS application</title>
+  </head>
+  <body>
+    <h1>In-Home Supportive Services — Cedar Hollow County</h1>
+    <p>
+      Apply for help with domestic and personal care so you can remain at
+      home. A county worker reviews this form before anyone is authorized.
+    </p>
+    <form id="ihss-intake">
+      <label for="applicant-first-name">First name</label>
+      <input id="applicant-first-name" name="first_name" type="text" required />
+
+      <label for="applicant-ssn">Social Security Number</label>
+      <input id="applicant-ssn" name="ssn" type="text" required />
+
+      <label for="birth-date">Date of birth</label>
+      <input id="birth-date" name="birth_date" type="date" required />
+
+      <label for="signature-date">Signature date</label>
+      <input id="signature-date" name="signature_date" type="date" required />
+
+      <label for="case-number">Case number</label>
+      <input id="case-number" name="case_number" type="text" />
+
+      <button id="submit-intake" type="submit">Submit</button>
+    </form>
+  </body>
+</html>

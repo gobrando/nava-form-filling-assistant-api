@@ -1,0 +1,48 @@
+<!doctype html>
+<!--
+  Briar County Medicaid and SNAP renewal.
+
+  Home address and mailing address were given the same visible label.
+  That is a tie for the single street-address field on the BenefitsCal
+  playbook, so publish has to be refused. The other questions still have
+  one label each.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Briar County Medicaid and SNAP renewal</title>
+  </head>
+  <body>
+    <h1>Renew Medicaid and SNAP — Briar County</h1>
+    <p>
+      Annual renewal for medical coverage and food assistance. Answer for
+      the household that lives at the home address. Leave the mailing line
+      blank when mail should go to that same place.
+    </p>
+    <form id="renewal">
+      <label for="spoken-language">Primary language</label>
+      <select id="spoken-language" name="language">
+        <option value="">- Select -</option>
+        <option>English</option>
+        <option>Spanish</option>
+      </select>
+
+      <label for="home-street">Street address</label>
+      <input id="home-street" name="home_street" type="text" required />
+
+      <label for="mailing-street">Street address</label>
+      <input id="mailing-street" name="mailing_street" type="text" />
+
+      <label for="postal">ZIP code</label>
+      <input id="postal" name="postal" type="text" required />
+
+      <label for="birth-date">Date of birth</label>
+      <input id="birth-date" name="birth_date" type="date" required />
+
+      <label for="applicant-ssn">Social Security Number</label>
+      <input id="applicant-ssn" name="ssn" type="text" required />
+
+      <button id="submit-renewal" type="submit">Submit renewal</button>
+    </form>
+  </body>
+</html>
