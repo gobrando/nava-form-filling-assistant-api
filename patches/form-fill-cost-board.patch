@@ -1,0 +1,973 @@
+diff --git a/README.md b/README.md
+index 405725e..59566e0 100644
+--- a/README.md
++++ b/README.md
+@@ -76,6 +76,16 @@ If you want to pre-populate the UI inputs (useful when you reload the dashboard
+ | `PHOENIX_API_URL` | No | Default Phoenix URL (overridden by sidebar input) |
+ | `PHOENIX_API_KEY` | No | API key if your Phoenix instance requires auth |
+ 
++### Nava form-filling assistant
++
++This product has no Phoenix project. The cold path has not been run against a model, so the cost view is a scenario from the assumptions in the config, not a trace export.
++
++```bash
++DASHBOARD_CONFIG=products/nava-form-filling.yaml streamlit run dashboard.py
++```
++
++The **Form-fill cost** view is on the page. Change the price per model turn, the turns per cold run, and the share of drifts the deterministic scribe closes. The formula is on that view. The row named for 5 of 9 is the local drift lab fixture set, not a production rate.
++
+ ---
+ 
+ ## For Developers
+@@ -96,6 +106,8 @@ phoenix-pm-dashboard/
+ ├── phoenix_client.py     # Phoenix GraphQL API client
+ ├── config.py             # Config loader and helpers
+ ├── config.example.yaml   # Example configuration
++├── form_fill_cost.py     # Form-fill cost scenarios (no Phoenix)
++├── products/             # Product configs, opened with DASHBOARD_CONFIG
+ ├── requirements.txt
+ └── README.md
+ ```
+diff --git a/config.example.yaml b/config.example.yaml
+index 3df6ee3..90913ca 100644
+--- a/config.example.yaml
++++ b/config.example.yaml
+@@ -170,3 +170,14 @@ categories:
+   #     - "rent"
+   #     - "homeless"
+   #     - "eviction"
++
++# ---------------------------------------------------------------------------
++# Form-fill cost — optional. For a product whose model cost is an assumption,
++# not a Phoenix trace export. See products/nava-form-filling.yaml.
++# ---------------------------------------------------------------------------
++# form_fill_cost:
++#   currency: USD
++#   price_per_model_turn: 0.05
++#   turns_per_cold_run: 10
++#   scribe_closes: 5
++#   scribe_share_denominator: 9
+diff --git a/config.py b/config.py
+index 2fc568d..7123cd6 100644
+--- a/config.py
++++ b/config.py
+@@ -61,6 +61,22 @@ class CategoryConfig:
+     keywords: List[str] = field(default_factory=list)
+ 
+ 
++@dataclass
++class FormFillCostConfig:
++    """
++    Explicit cost assumptions for a form-filling product.
++
++    These are not Phoenix measurements. price and turns are placeholders a
++    reviewer can change. The default close share may match a local fixture
++    set; that share is still an assumption, not a production rate.
++    """
++    currency: str = "USD"
++    price_per_model_turn: float = 0.0
++    turns_per_cold_run: int = 0
++    scribe_closes: int = 0
++    scribe_share_denominator: int = 1
++
++
+ @dataclass
+ class DashboardConfig:
+     product_name: str = "My AI Product"
+@@ -95,6 +111,9 @@ class DashboardConfig:
+     secondary_phoenix_url: str = ""
+     secondary_project_id: str = ""
+ 
++    # Optional form-fill cost assumptions. None means the view is hidden.
++    form_fill_cost: Optional[FormFillCostConfig] = None
++
+ 
+ def load_config(path: Optional[str] = None) -> DashboardConfig:
+     """Load configuration from YAML file. Returns defaults if file not found."""
+@@ -183,6 +202,17 @@ def load_config(path: Optional[str] = None) -> DashboardConfig:
+             keywords=cat.get('keywords', [])
+         ))
+ 
++    # Form-fill cost assumptions. Absent means this product has no cost view.
++    form_fill = raw.get('form_fill_cost')
++    if form_fill:
++        config.form_fill_cost = FormFillCostConfig(
++            currency=str(form_fill.get('currency', 'USD')),
++            price_per_model_turn=float(form_fill.get('price_per_model_turn', 0)),
++            turns_per_cold_run=int(form_fill.get('turns_per_cold_run', 0)),
++            scribe_closes=int(form_fill.get('scribe_closes', 0)),
++            scribe_share_denominator=int(form_fill.get('scribe_share_denominator', 1)),
++        )
++
+     return config
+ 
+ 
+diff --git a/dashboard.py b/dashboard.py
+index 3761e2f..ff2c434 100644
+--- a/dashboard.py
++++ b/dashboard.py
+@@ -17,6 +17,7 @@ from dotenv import load_dotenv
+ 
+ from phoenix_client import PhoenixClient
+ from data_analyzer import TraceAnalyzer
++from form_fill_cost import render_form_fill_cost
+ from config import (
+     load_config,
+     get_all_meeting_starts,
+@@ -334,7 +335,13 @@ def _fetch_data(
+ def main():
+     product_name = _get_product_name()
+     st.title(f"📊 {product_name} — GenAI Product Dashboard")
+-    st.markdown("*Analyze your GenAI product usage and quality metrics from Phoenix Arize trace logs*")
++    if CONFIG.form_fill_cost is not None:
++        st.markdown(
++            "*Form-fill cost is a scenario from the assumptions in this product's config. "
++            "It does not load Phoenix traces.*"
++        )
++    else:
++        st.markdown("*Analyze your GenAI product usage and quality metrics from Phoenix Arize trace logs*")
+ 
+     # ------------------------------------------------------------------
+     # Sidebar configuration
+@@ -526,14 +533,19 @@ def main():
+         # Guard: empty URL
+         if not api_url or not api_url.startswith("http"):
+             if load_button:
+-                st.warning(
+-                    "Please paste a valid Phoenix URL in the sidebar to get started. "
+-                    "It should look like `https://phoenix.example.com:6006` or a full "
+-                    "spans URL such as `https://phoenix.example.com:6006/projects/ABC/spans`."
+-                )
++                if CONFIG.form_fill_cost is not None:
++                    st.info(
++                        "Form-fill cost does not read Phoenix. "
++                        "Leave the URL empty unless you are loading traces for another product."
++                    )
++                else:
++                    st.warning(
++                        "Please paste a valid Phoenix URL in the sidebar to get started. "
++                        "It should look like `https://phoenix.example.com:6006` or a full "
++                        "spans URL such as `https://phoenix.example.com:6006/projects/ABC/spans`."
++                    )
+             if not st.session_state.data_loaded:
+-                # Show landing page
+-                _show_landing_page()
++                _show_without_traces()
+                 return
+ 
+         try:
+@@ -628,7 +640,7 @@ def main():
+             return
+ 
+     if not st.session_state.data_loaded:
+-        _show_landing_page()
++        _show_without_traces()
+         return
+ 
+     analyzer = st.session_state.analyzer
+@@ -687,7 +699,7 @@ def main():
+     # ------------------------------------------------------------------
+     # Main dashboard tabs
+     # ------------------------------------------------------------------
+-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
++    tab_labels = [
+         "📈 Executive Summary",
+         "📊 Usage Analytics",
+         "📋 Usage Report",
+@@ -695,7 +707,12 @@ def main():
+         "🔎 Log Explorer",
+         "🧠 Advanced Analytics",
+         "✅ Evals",
+-    ])
++    ]
++    if CONFIG.form_fill_cost is not None:
++        tab_labels.append("💵 Form-fill cost")
++    opened_tabs = st.tabs(tab_labels)
++    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = opened_tabs[:7]
++    form_fill_tab = opened_tabs[7] if len(opened_tabs) > 7 else None
+ 
+     # ==================================================================
+     # TAB 1: Executive Summary
+@@ -4011,11 +4028,29 @@ def main():
+                         else:
+                             st.success("No traces failed the automated checks with current thresholds.")
+ 
++    if form_fill_tab is not None:
++        with form_fill_tab:
++            render_form_fill_cost(CONFIG.form_fill_cost, product_name=_get_product_name())
++
+ 
+ # ---------------------------------------------------------------------------
+ # Landing page (shown before data is loaded)
+ # ---------------------------------------------------------------------------
+ 
++def _show_without_traces():
++    """What to show before any Phoenix traces are loaded."""
++    if CONFIG.form_fill_cost is not None:
++        render_form_fill_cost(CONFIG.form_fill_cost, product_name=_get_product_name())
++        st.divider()
++        st.markdown("#### Phoenix traces")
++        st.markdown(
++            "This product has no Phoenix project. The cold path has not been run "
++            "against a model, so there is no production traffic to load. "
++            "The numbers above are scenarios from the assumptions in the config."
++        )
++        return
++    _show_landing_page()
++
+ def _show_landing_page():
+     """Show a friendly getting-started page when no data is loaded."""
+     st.markdown("---")
+diff --git a/form_fill_cost.py b/form_fill_cost.py
+new file mode 100644
+index 0000000..6ace5ff
+--- /dev/null
++++ b/form_fill_cost.py
+@@ -0,0 +1,497 @@
++"""
++Form-fill cost scenarios for a product that has not been run against a model.
++
++The warm path (`executionMode: script`) is a playbook join and makes no model
++calls. A cold path is one Eve run (scout, fill, form review, scribe). The
++deterministic scribe keeps a drifted page on the warm path when every old
++field still has one unambiguous label. A tie, a protected-field mismatch, or
++a dropped field refuses, and the model is only for that refusal.
++
++Nothing in this module reads Phoenix or invents a traffic volume. A scenario
++scale is labeled as a scenario. The 5-of-9 row is the local drift lab's
++fixture set, not a production rate.
++"""
++from __future__ import annotations
++
++from dataclasses import dataclass
++from decimal import Decimal
++from fractions import Fraction
++from typing import List, Optional
++
++# The local drift lab scored 5 publishable fixtures out of 9.
++# That is a fixture set. It is not a production rate.
++DRIFT_LAB_CLOSES = 5
++DRIFT_LAB_FIXTURES = 9
++DRIFT_LAB_SCENARIO_NAME = "Drift lab fixture set (5 of 9)"
++ALL_MODEL_SCENARIO_NAME = "All drifts sent to the model"
++
++# Comparison rows use the fixture count so 5 of 9 stays a whole number.
++# This is not a county volume.
++SCENARIO_SCALE = DRIFT_LAB_FIXTURES
++
++FORMULA = (
++    "warm_cost = 0\n"
++    "cold_cost = turns_per_cold_run * price_per_model_turn\n"
++    "cost_per_drift = (1 - scribe_close_share) * turns_per_cold_run * price_per_model_turn\n"
++    "scenario_cost = cost_per_drift * scenario_drifts"
++)
++
++# Shown with the formula so a reviewer can see what the cost does not include.
++FORMULA_EXCLUSIONS = (
++    "Readback is still required and is not a model turn. "
++    "The product never submits; a human does. Submission is not a model turn."
++)
++
++DRIFT_SCOPE_NOTE = (
++    "These scenarios are drifted pages that already have a playbook. "
++    "A site with no playbook is a cold run, and the scribe close share does not apply to it."
++)
++
++
++class CostAssumptionError(ValueError):
++    """An assumption is outside the range the formula allows."""
++
++
++@dataclass(frozen=True)
++class CostAssumptions:
++    """Explicit assumptions. None of these fields are measurements."""
++
++    price_per_model_turn: Decimal
++    turns_per_cold_run: int
++    scribe_closes: int
++    scribe_share_denominator: int
++    currency: str = "USD"
++
++    def validate(self) -> None:
++        if self.price_per_model_turn < 0:
++            raise CostAssumptionError("price_per_model_turn must be >= 0")
++        if not isinstance(self.turns_per_cold_run, int) or isinstance(self.turns_per_cold_run, bool):
++            raise CostAssumptionError("turns_per_cold_run must be a non-negative integer")
++        if self.turns_per_cold_run < 0:
++            raise CostAssumptionError("turns_per_cold_run must be >= 0")
++        if (
++            not isinstance(self.scribe_share_denominator, int)
++            or isinstance(self.scribe_share_denominator, bool)
++            or self.scribe_share_denominator <= 0
++        ):
++            raise CostAssumptionError("scribe_share_denominator must be a positive integer")
++        if (
++            not isinstance(self.scribe_closes, int)
++            or isinstance(self.scribe_closes, bool)
++            or self.scribe_closes < 0
++            or self.scribe_closes > self.scribe_share_denominator
++        ):
++            raise CostAssumptionError(
++                "scribe_closes must be an integer from 0 through scribe_share_denominator"
++            )
++        if not self.currency:
++            raise CostAssumptionError("currency must be set")
++
++    @property
++    def scribe_close_share(self) -> Fraction:
++        self.validate()
++        return Fraction(self.scribe_closes, self.scribe_share_denominator)
++
++
++def _as_decimal(value) -> Decimal:
++    if isinstance(value, Decimal):
++        return value
++    if isinstance(value, float):
++        return Decimal(format(value, ".10f"))
++    return Decimal(str(value))
++
++
++def _fraction_to_decimal(value: Fraction) -> Decimal:
++    return Decimal(value.numerator) / Decimal(value.denominator)
++
++
++def assumptions_from_config(config) -> CostAssumptions:
++    """Build assumptions from a FormFillCostConfig (or any object with the fields)."""
++    built = CostAssumptions(
++        price_per_model_turn=_as_decimal(config.price_per_model_turn),
++        turns_per_cold_run=int(config.turns_per_cold_run),
++        scribe_closes=int(config.scribe_closes),
++        scribe_share_denominator=int(config.scribe_share_denominator),
++        currency=str(config.currency or "USD"),
++    )
++    built.validate()
++    return built
++
++
++def warm_cost(_assumptions: Optional[CostAssumptions] = None) -> Decimal:
++    """A warm run is a playbook join. It does not call a model."""
++    return Decimal("0")
++
++
++def cold_cost(assumptions: CostAssumptions) -> Decimal:
++    """One cold run: Eve (scout, fill, form review, scribe)."""
++    assumptions.validate()
++    return assumptions.price_per_model_turn * Decimal(assumptions.turns_per_cold_run)
++
++
++def cost_for_execution_mode(execution_mode: str, assumptions: CostAssumptions) -> Decimal:
++    """Cost of one recorded run. `script` is warm. `model` is one cold run."""
++    if execution_mode == "script":
++        return warm_cost(assumptions)
++    if execution_mode == "model":
++        return cold_cost(assumptions)
++    raise CostAssumptionError(f"unknown executionMode: {execution_mode}")
++
++
++def drift_model_cost(publishable: bool, assumptions: CostAssumptions) -> Decimal:
++    """The model is only for a refusal. A publishable repair stays warm."""
++    if publishable:
++        return warm_cost(assumptions)
++    return cold_cost(assumptions)
++
++
++def cost_per_drift(assumptions: CostAssumptions, close_share: Optional[Fraction] = None) -> Decimal:
++    """
++    Expected model cost of one drift.
++
++    cost_per_drift = (1 - scribe_close_share) * turns_per_cold_run * price_per_model_turn
++    """
++    assumptions.validate()
++    share = assumptions.scribe_close_share if close_share is None else close_share
++    if share < 0 or share > 1:
++        raise CostAssumptionError("scribe_close_share must be between 0 and 1")
++    refused = Fraction(1) - share
++    return cold_cost(assumptions) * _fraction_to_decimal(refused)
++
++
++@dataclass(frozen=True)
++class ScenarioResult:
++    name: str
++    classification: str
++    note: str
++    close_share: Fraction
++    scenario_drifts: int
++    drifts_closed_without_model: Fraction
++    drifts_sent_to_model: Fraction
++    model_turns: Decimal
++    cost: Decimal
++    cost_per_drift: Decimal
++    currency: str
++
++    def as_record(self) -> dict:
++        return {
++            "scenario": self.name,
++            "classification": self.classification,
++            "close_share": _format_fraction(self.close_share),
++            "scenario_drifts": self.scenario_drifts,
++            "drifts_closed_without_model": _format_fraction(self.drifts_closed_without_model),
++            "drifts_sent_to_model": _format_fraction(self.drifts_sent_to_model),
++            "model_turns": _format_decimal(self.model_turns),
++            "cost": format_money(self.cost, self.currency),
++            "cost_per_drift": format_money(self.cost_per_drift, self.currency),
++            "note": self.note,
++        }
++
++
++def _format_fraction(value: Fraction) -> str:
++    whole = Fraction(value)
++    if whole.denominator == 1:
++        return str(whole.numerator)
++    return f"{whole.numerator}/{whole.denominator}"
++
++
++def _format_decimal(value: Decimal) -> str:
++    quantized = value.quantize(Decimal("0.0001"))
++    text = format(quantized, "f")
++    if "." in text:
++        text = text.rstrip("0").rstrip(".")
++    return text or "0"
++
++
++def format_money(amount: Decimal, currency: str) -> str:
++    quantized = amount.quantize(Decimal("0.0001"))
++    text = format(quantized, "f")
++    whole, frac = text.split(".")
++    frac = frac.rstrip("0")
++    if len(frac) < 2:
++        frac = frac.ljust(2, "0")
++    return f"{whole}.{frac} {currency}"
++
++
++def _scenario_result(
++    name: str,
++    note: str,
++    closes: int,
++    denominator: int,
++    scenario_drifts: int,
++    assumptions: CostAssumptions,
++) -> ScenarioResult:
++    share = Fraction(closes, denominator)
++    closed = Fraction(scenario_drifts) * share
++    sent = Fraction(scenario_drifts) - closed
++    per_drift = cost_per_drift(assumptions, share)
++    turns = Decimal(assumptions.turns_per_cold_run) * _fraction_to_decimal(sent)
++    cost = assumptions.price_per_model_turn * turns
++    return ScenarioResult(
++        name=name,
++        classification="scenario",
++        note=note,
++        close_share=share,
++        scenario_drifts=scenario_drifts,
++        drifts_closed_without_model=closed,
++        drifts_sent_to_model=sent,
++        model_turns=turns,
++        cost=cost,
++        cost_per_drift=per_drift,
++        currency=assumptions.currency,
++    )
++
++
++def scenario_table(
++    assumptions: CostAssumptions,
++    scenario_drifts: int = SCENARIO_SCALE,
++) -> List[ScenarioResult]:
++    """
++    Compare two named scenarios, plus the reviewer's current assumption.
++
++    The scale defaults to the drift lab fixture count so the 5-of-9 row is
++    an integer count of fixtures. It is a scenario scale, not a measured volume.
++    """
++    assumptions.validate()
++    if not isinstance(scenario_drifts, int) or isinstance(scenario_drifts, bool) or scenario_drifts < 0:
++        raise CostAssumptionError("scenario_drifts must be a non-negative integer")
++
++    rows = [
++        _scenario_result(
++            ALL_MODEL_SCENARIO_NAME,
++            "Scenario: every drift is sent to the model. Not a measurement of traffic.",
++            0,
++            1,
++            scenario_drifts,
++            assumptions,
++        ),
++        _scenario_result(
++            DRIFT_LAB_SCENARIO_NAME,
++            (
++                "Scenario: the local drift lab fixture set, 5 of 9 fixtures publish. "
++                "Not a production rate. The model path has not been run."
++            ),
++            DRIFT_LAB_CLOSES,
++            DRIFT_LAB_FIXTURES,
++            scenario_drifts,
++            assumptions,
++        ),
++        _scenario_result(
++            "Current assumption",
++            (
++                "Scenario: the close share set in the assumptions above. "
++                "Not a measurement. The scale is the drift lab fixture count, "
++                "so this row can be compared with the other two. It is not a county volume."
++            ),
++            assumptions.scribe_closes,
++            assumptions.scribe_share_denominator,
++            scenario_drifts,
++            assumptions,
++        ),
++    ]
++    for row in rows:
++        if row.classification != "scenario":
++            raise CostAssumptionError("every cost row must be labeled as a scenario")
++    return rows
++
++
++def substituted_formula(assumptions: CostAssumptions) -> str:
++    """The formula with the current assumptions filled in."""
++    assumptions.validate()
++    share = assumptions.scribe_close_share
++    cold = cold_cost(assumptions)
++    per_drift = cost_per_drift(assumptions)
++    price = format_money(assumptions.price_per_model_turn, assumptions.currency)
++    return (
++        f"{FORMULA}\n"
++        f"\n"
++        f"price_per_model_turn = {price} (assumption)\n"
++        f"turns_per_cold_run = {assumptions.turns_per_cold_run} (assumption; cold path has not been run)\n"
++        f"scribe_close_share = {share.numerator}/{share.denominator} (assumption)\n"
++        f"warm_cost = {format_money(warm_cost(assumptions), assumptions.currency)}\n"
++        f"cold_cost = {assumptions.turns_per_cold_run} * {price}\n"
++        f"          = {format_money(cold, assumptions.currency)}\n"
++        f"cost_per_drift = (1 - {share.numerator}/{share.denominator}) * {assumptions.turns_per_cold_run} * {price}\n"
++        f"               = {format_money(per_drift, assumptions.currency)}\n"
++        f"\n"
++        f"{FORMULA_EXCLUSIONS}"
++    )
++
++
++REPAIR_RULES = (
++    {
++        "case": "Every old field still has one unambiguous label",
++        "model": "No model calls",
++        "next_run": "Stays warm (executionMode script). A playbook join fills the form.",
++    },
++    {
++        "case": "Tie — two controls share one label",
++        "model": "Model, only because the deterministic scribe refused",
++        "next_run": "Cold path until a playbook can be published.",
++    },
++    {
++        "case": "Protected-field mismatch — SSN onto case number",
++        "model": "Model, only because the deterministic scribe refused",
++        "next_run": "Cold path. The scribe will not move SSN onto case number.",
++    },
++    {
++        "case": "Dropped field",
++        "model": "Model, only because the deterministic scribe refused",
++        "next_run": "Cold path. One unresolved field blocks publish.",
++    },
++    {
++        "case": "Readback",
++        "model": "Not a model turn",
++        "next_run": "Still required. A repaired playbook does not skip readback.",
++    },
++    {
++        "case": "Submit",
++        "model": "Not a model turn",
++        "next_run": "The product never submits. A human does.",
++    },
++)
++
++
++def render_form_fill_cost(config, product_name: str = "Nava form-filling assistant") -> None:
++    """Streamlit view. Assumptions are editable; the math is form_fill_cost."""
++    import streamlit as st
++
++    st.header("Form-fill cost")
++    st.markdown(f"*{product_name}*")
++    st.info(
++        "The cold path (Eve: scout, fill, form review, scribe) has not been run "
++        "against a model. This view does not connect to Phoenix and it does not "
++        "show production traffic. Every cost below is a scenario computed from "
++        "the assumptions. Change the assumptions to recompute. Do not read the "
++        "scenario scale as a county volume."
++    )
++
++    st.subheader("Assumptions")
++    st.caption(
++        "These start from the product config. Editing them here does not write "
++        "the file. The cold-path turn count and the price are assumptions, "
++        "because that path has never been run."
++    )
++    col_price, col_turns, col_closes, col_denom = st.columns(4)
++    with col_price:
++        price = st.number_input(
++            f"Price per model turn ({config.currency})",
++            min_value=0.0,
++            value=float(config.price_per_model_turn),
++            step=0.01,
++            format="%.4f",
++            key="form_fill_price_per_model_turn",
++            help="Assumption. Not a measured price. The cold path has not been run against a model.",
++        )
++    with col_turns:
++        turns = st.number_input(
++            "Turns per cold run",
++            min_value=0,
++            value=int(config.turns_per_cold_run),
++            step=1,
++            key="form_fill_turns_per_cold_run",
++            help=(
++                "Assumption. A cold run is Eve: scout, fill, form review, and scribe. "
++                "The turn count has not been measured."
++            ),
++        )
++    with col_denom:
++        denominator = st.number_input(
++            "Drifts in the close share",
++            min_value=1,
++            value=int(config.scribe_share_denominator),
++            step=1,
++            key="form_fill_scribe_share_denominator",
++            help=(
++                "Denominator of the assumption share. This is a ratio, not a count "
++                "of applications. The default 9 is the drift lab fixture count."
++            ),
++        )
++    with col_closes:
++        closes = st.number_input(
++            "Drifts the deterministic scribe closes",
++            min_value=0,
++            value=int(config.scribe_closes),
++            step=1,
++            key="form_fill_scribe_closes",
++            help=(
++                "Numerator of the assumption share. The default 5 of 9 is the local "
++                "drift lab fixture set, not a production rate."
++            ),
++        )
++
++    try:
++        assumptions = CostAssumptions(
++            price_per_model_turn=_as_decimal(price),
++            turns_per_cold_run=int(turns),
++            scribe_closes=int(closes),
++            scribe_share_denominator=int(denominator),
++            currency=str(config.currency or "USD"),
++        )
++        assumptions.validate()
++    except (CostAssumptionError, ValueError) as exc:
++        st.error(str(exc))
++        return
++
++    st.subheader("Formula")
++    st.code(substituted_formula(assumptions), language="text")
++
++    warm = warm_cost(assumptions)
++    cold = cold_cost(assumptions)
++    per_drift = cost_per_drift(assumptions)
++    metric_warm, metric_cold, metric_drift = st.columns(3)
++    with metric_warm:
++        st.metric(
++            "Warm path",
++            format_money(warm, assumptions.currency),
++            help="executionMode script. A playbook join. No model calls.",
++        )
++    with metric_cold:
++        st.metric(
++            "One cold run",
++            format_money(cold, assumptions.currency),
++            help="executionMode model. Eve: scout, fill, form review, scribe. Assumption, not a measured run.",
++        )
++    with metric_drift:
++        st.metric(
++            "Expected cost per drift",
++            format_money(per_drift, assumptions.currency),
++            help="Uses the close share in the assumptions. A scenario, not a measured rate.",
++        )
++
++    st.subheader("Scenario table")
++    st.caption(
++        f"Each row is a scenario on a scale of {SCENARIO_SCALE} drifts. "
++        f"{SCENARIO_SCALE} is the local drift lab's fixture count, so the "
++        "5-of-9 row counts fixtures. It is not a county volume and not a "
++        f"production rate. {DRIFT_SCOPE_NOTE}"
++    )
++    rows = scenario_table(assumptions)
++    st.dataframe(
++        [row.as_record() for row in rows],
++        hide_index=True,
++        use_container_width=True,
++    )
++
++    lab = rows[1]
++    all_model = rows[0]
++    difference = all_model.cost - lab.cost
++    st.caption(
++        f"On that scenario scale, sending every drift to the model costs "
++        f"{format_money(all_model.cost, assumptions.currency)}. "
++        f"The drift lab fixture set sends "
++        f"{_format_fraction(lab.drifts_sent_to_model)} of "
++        f"{SCENARIO_SCALE} to the model and costs "
++        f"{format_money(lab.cost, assumptions.currency)}. "
++        f"The difference, {format_money(difference, assumptions.currency)}, "
++        "is the model cost those published fixtures do not spend in this scenario."
++    )
++
++    st.subheader("What the deterministic scribe closes")
++    st.markdown(
++        "When every old field still has one unambiguous label, the scribe "
++        "publishes and the next run stays warm. A tie, a protected-field "
++        "mismatch (SSN onto case number), or a dropped field refuses. "
++        "The model is only for the refusal."
++    )
++    st.dataframe(list(REPAIR_RULES), hide_index=True, use_container_width=True)
+diff --git a/products/nava-form-filling.yaml b/products/nava-form-filling.yaml
+new file mode 100644
+index 0000000..0fbdee8
+--- /dev/null
++++ b/products/nava-form-filling.yaml
+@@ -0,0 +1,30 @@
++# ============================================================================
++# Nava form-filling assistant
++# ============================================================================
++# Open with:
++#   DASHBOARD_CONFIG=products/nava-form-filling.yaml streamlit run dashboard.py
++#
++# This product has no Phoenix project. The cold path has not been run against
++# a model. Do not point this file at a live Phoenix instance, and do not treat
++# the numbers below as production traffic.
++# ============================================================================
++
++product:
++  name: "Nava form-filling assistant"
++
++# ---------------------------------------------------------------------------
++# Cost assumptions. A reviewer can change these in the Form-fill cost view.
++# price_per_model_turn and turns_per_cold_run are placeholders so the formula
++# has numbers. They are not a quote and not a trace export.
++#
++# scribe_closes / scribe_share_denominator defaults to 5/9 because that is
++# what the local drift lab scored on its fixture set. It is not a production
++# rate. The named "Drift lab fixture set (5 of 9)" row stays 5 of 9 even if
++# this share is edited.
++# ---------------------------------------------------------------------------
++form_fill_cost:
++  currency: USD
++  price_per_model_turn: 0.05
++  turns_per_cold_run: 10
++  scribe_closes: 5
++  scribe_share_denominator: 9
+diff --git a/tests/test_form_fill_cost.py b/tests/test_form_fill_cost.py
+new file mode 100644
+index 0000000..3920a38
+--- /dev/null
++++ b/tests/test_form_fill_cost.py
+@@ -0,0 +1,208 @@
++"""Cost math for the Nava form-filling assistant. No Phoenix, no traffic."""
++import unittest
++from decimal import Decimal
++from fractions import Fraction
++from pathlib import Path
++
++from config import load_config
++from form_fill_cost import (
++    ALL_MODEL_SCENARIO_NAME,
++    DRIFT_LAB_CLOSES,
++    DRIFT_LAB_FIXTURES,
++    DRIFT_LAB_SCENARIO_NAME,
++    DRIFT_SCOPE_NOTE,
++    FORMULA,
++    SCENARIO_SCALE,
++    substituted_formula,
++    CostAssumptionError,
++    CostAssumptions,
++    cold_cost,
++    cost_for_execution_mode,
++    cost_per_drift,
++    drift_model_cost,
++    scenario_table,
++    warm_cost,
++)
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def assumptions(**overrides) -> CostAssumptions:
++    values = dict(
++        price_per_model_turn=Decimal("0.05"),
++        turns_per_cold_run=10,
++        scribe_closes=5,
++        scribe_share_denominator=9,
++        currency="USD",
++    )
++    values.update(overrides)
++    built = CostAssumptions(**values)
++    built.validate()
++    return built
++
++
++class WarmAndColdTests(unittest.TestCase):
++    def test_warm_path_has_no_model_cost(self):
++        self.assertEqual(warm_cost(assumptions()), Decimal("0"))
++        self.assertEqual(cost_for_execution_mode("script", assumptions()), Decimal("0"))
++
++    def test_cold_path_is_turns_times_price(self):
++        cost = cold_cost(assumptions())
++        self.assertEqual(cost, Decimal("0.50"))
++        self.assertEqual(cost_for_execution_mode("model", assumptions()), cost)
++
++    def test_unknown_execution_mode_is_rejected(self):
++        with self.assertRaises(CostAssumptionError):
++            cost_for_execution_mode("submit", assumptions())
++
++    def test_formula_names_the_three_assumptions(self):
++        self.assertIn("price_per_model_turn", FORMULA)
++        self.assertIn("turns_per_cold_run", FORMULA)
++        self.assertIn("scribe_close_share", FORMULA)
++        self.assertIn("warm_cost = 0", FORMULA)
++        self.assertNotIn("county", FORMULA.lower())
++
++    def test_substituted_formula_uses_the_assumptions(self):
++        text = substituted_formula(assumptions())
++        self.assertIn("scribe_close_share = 5/9", text)
++        self.assertIn("cold_cost = 10 * 0.05 USD", text)
++        self.assertIn("= 0.50 USD", text)
++        self.assertIn("= 0.2222 USD", text)
++        self.assertIn("Readback is still required", text)
++        self.assertIn("never submits", text)
++        self.assertNotIn("000000", text)
++
++
++class DriftRepairTests(unittest.TestCase):
++    def test_publishable_repair_stays_warm(self):
++        self.assertEqual(drift_model_cost(True, assumptions()), Decimal("0"))
++
++    def test_refusal_costs_one_cold_run(self):
++        self.assertEqual(drift_model_cost(False, assumptions()), Decimal("0.50"))
++
++    def test_expected_cost_uses_the_unclosed_share(self):
++        # 5 of 9 close, so 4 of 9 are refusals. Each refusal is one cold run.
++        expected = Decimal("0.50") * Decimal(4) / Decimal(9)
++        self.assertEqual(cost_per_drift(assumptions()), expected)
++
++    def test_closing_every_drift_removes_the_model_cost(self):
++        closed = assumptions(scribe_closes=9, scribe_share_denominator=9)
++        self.assertEqual(cost_per_drift(closed), Decimal("0"))
++
++    def test_sending_every_drift_to_the_model_is_one_cold_run_each(self):
++        none_closed = assumptions(scribe_closes=0, scribe_share_denominator=9)
++        self.assertEqual(cost_per_drift(none_closed), Decimal("0.50"))
++
++    def test_more_closes_never_increases_cost(self):
++        previous = None
++        for closes in range(0, 10):
++            cost = cost_per_drift(assumptions(scribe_closes=closes))
++            if previous is not None:
++                self.assertLessEqual(cost, previous)
++            previous = cost
++
++
++class ScenarioTableTests(unittest.TestCase):
++    def test_named_rows_and_the_lab_fixture_arithmetic(self):
++        rows = scenario_table(assumptions())
++        self.assertEqual(
++            [row.name for row in rows],
++            [
++                ALL_MODEL_SCENARIO_NAME,
++                DRIFT_LAB_SCENARIO_NAME,
++                "Current assumption",
++            ],
++        )
++        for row in rows:
++            self.assertEqual(row.classification, "scenario")
++            self.assertEqual(row.scenario_drifts, SCENARIO_SCALE)
++            self.assertIn("not a", row.note.lower())
++
++        all_model, lab, current = rows
++        self.assertEqual(all_model.drifts_closed_without_model, Fraction(0))
++        self.assertEqual(all_model.drifts_sent_to_model, Fraction(9))
++        self.assertEqual(all_model.model_turns, Decimal("90"))
++        self.assertEqual(all_model.cost, Decimal("4.50"))
++
++        self.assertEqual(lab.close_share, Fraction(DRIFT_LAB_CLOSES, DRIFT_LAB_FIXTURES))
++        self.assertEqual(lab.drifts_closed_without_model, Fraction(5))
++        self.assertEqual(lab.drifts_sent_to_model, Fraction(4))
++        self.assertEqual(lab.model_turns, Decimal("40"))
++        self.assertEqual(lab.cost, Decimal("2.00"))
++        self.assertIn("fixture", lab.note.lower())
++        self.assertIn("not a production rate", lab.note.lower())
++        self.assertNotIn("county", lab.note.lower())
++        self.assertIn("no playbook", DRIFT_SCOPE_NOTE.lower())
++        self.assertIn("cold run", DRIFT_SCOPE_NOTE.lower())
++
++        # The product default matches the lab, so the assumption row agrees.
++        self.assertEqual(current.cost, lab.cost)
++        self.assertEqual(current.drifts_sent_to_model, Fraction(4))
++
++    def test_editing_the_share_does_not_rewrite_the_lab_row(self):
++        rows = scenario_table(assumptions(scribe_closes=1, scribe_share_denominator=2))
++        all_model, lab, current = rows
++        self.assertEqual(lab.drifts_closed_without_model, Fraction(5))
++        self.assertEqual(lab.cost, Decimal("2.00"))
++        self.assertEqual(all_model.cost, Decimal("4.50"))
++        # Half of 9 fixtures, as a scenario: 4.5 closed, 4.5 sent to the model.
++        self.assertEqual(current.close_share, Fraction(1, 2))
++        self.assertEqual(current.drifts_closed_without_model, Fraction(9, 2))
++        self.assertEqual(current.drifts_sent_to_model, Fraction(9, 2))
++        self.assertEqual(current.model_turns, Decimal("45"))
++        self.assertEqual(current.cost, Decimal("2.25"))
++
++    def test_zero_price_and_zero_turns_are_zero_cost_scenarios(self):
++        rows = scenario_table(assumptions(price_per_model_turn=Decimal("0"), turns_per_cold_run=0))
++        for row in rows:
++            self.assertEqual(row.cost, Decimal("0"))
++            self.assertEqual(row.classification, "scenario")
++
++    def test_invalid_share_is_rejected(self):
++        with self.assertRaises(CostAssumptionError):
++            assumptions(scribe_closes=10, scribe_share_denominator=9).validate()
++        with self.assertRaises(CostAssumptionError):
++            assumptions(scribe_closes=-1).validate()
++        with self.assertRaises(CostAssumptionError):
++            assumptions(price_per_model_turn=Decimal("-0.01")).validate()
++        with self.assertRaises(CostAssumptionError):
++            scenario_table(assumptions(), scenario_drifts=-1)
++
++
++class ProductConfigTests(unittest.TestCase):
++    def test_nava_product_file_is_assumptions_not_a_phoenix_source(self):
++        config = load_config(str(ROOT / "products" / "nava-form-filling.yaml"))
++        self.assertEqual(config.product_name, "Nava form-filling assistant")
++        self.assertEqual(config.secondary_phoenix_url, "")
++        self.assertIsNotNone(config.form_fill_cost)
++        cost = config.form_fill_cost
++        self.assertEqual(cost.currency, "USD")
++        self.assertEqual(cost.price_per_model_turn, 0.05)
++        self.assertEqual(cost.turns_per_cold_run, 10)
++        self.assertEqual(cost.scribe_closes, DRIFT_LAB_CLOSES)
++        self.assertEqual(cost.scribe_share_denominator, DRIFT_LAB_FIXTURES)
++
++        loaded = assumptions(
++            price_per_model_turn=Decimal(str(cost.price_per_model_turn)),
++            turns_per_cold_run=cost.turns_per_cold_run,
++            scribe_closes=cost.scribe_closes,
++            scribe_share_denominator=cost.scribe_share_denominator,
++            currency=cost.currency,
++        )
++        rows = scenario_table(loaded)
++        self.assertEqual(rows[0].cost, Decimal("4.50"))
++        self.assertEqual(rows[1].cost, Decimal("2.00"))
++        self.assertEqual(rows[1].name, DRIFT_LAB_SCENARIO_NAME)
++
++    def test_example_config_has_no_form_fill_section(self):
++        config = load_config(str(ROOT / "config.example.yaml"))
++        self.assertIsNone(config.form_fill_cost)
++        self.assertEqual(config.product_name, "My AI Product")
++
++    def test_missing_config_keeps_defaults(self):
++        config = load_config(str(ROOT / "does-not-exist.yaml"))
++        self.assertIsNone(config.form_fill_cost)
++
++
++if __name__ == "__main__":
++    unittest.main()
