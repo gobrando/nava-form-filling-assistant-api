@@ -44,7 +44,9 @@ export function estimateJevCostUsd(inputTokens: number): number {
 
 export function sensitiveControl(field: InventoryField): boolean {
   const text = `${field.label} ${field.question} ${field.fieldKey}`;
-  return /social security|\bssn\b|taxpayer|employer identification|\bein\b/i.test(text);
+  return /social security|\bssn\b|taxpayer|employer identification|\bein\b|medi-cal number|\bcin\b/i.test(
+    text,
+  );
 }
 
 export function interpretDecisions(

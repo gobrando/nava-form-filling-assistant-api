@@ -415,6 +415,13 @@ or EIN control is never filled from that decision. Jev's list price is $0.042
 per million input tokens, and output tokens are free. Without the key, planning
 is unchanged.
 
+A cold start can send the same redacted inventory. The Eve message then lists
+map, ask, and leave, and a mapping is dropped when the control label does not
+share a word with the source. `pnpm compare:ihss` prices that decision pass on
+a fictional IHSS-sized page. It is the planning cost only. It is not a full
+browser run. `POST /v1/applications` also accepts `questions`, which are stored
+as gaps so `POST /v1/applications/{id}/share` can hand them to the client.
+
 ## Relationship to the Chrome extension
 
 The extension runs the same six-phase form-completion protocol client-side,

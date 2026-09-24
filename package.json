@@ -27,6 +27,7 @@
     "fixture": "tsx tests/fixtures/serve.ts",
     "prove": "tsx --env-file-if-exists=.env.local scripts/prove.ts",
     "compare": "tsx --env-file-if-exists=.env.local scripts/compare-models.ts",
+    "compare:ihss": "tsx --env-file-if-exists=.env.local scripts/compare-ihss.ts",
     "apricot": "tsx --env-file-if-exists=.env.local scripts/apricot-status.ts"
   },
   "dependencies": {
