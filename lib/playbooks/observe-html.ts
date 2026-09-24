@@ -46,3 +46,24 @@ export function observeHtml(html: string): ObservedControl[] {
 
   return found.map((control) => ({ ...control, count: counts.get(control.selector) ?? 1 }));
 }
+
+/**
+ * Reads `maxlength` from a local HTML fixture.
+ *
+ * This is not part of an observation. The scribe's schema stays selectors,
+ * labels, types, and counts. A readback checklist needs the limit because a
+ * box can accept a write, report nothing, and hold a shorter value.
+ */
+export function controlMaxLengths(html: string): Map<string, number> {
+  const limits = new Map<string, number>();
+  for (const match of html.matchAll(/<(input|textarea)\b([^>]*)>/gi)) {
+    const attrs = match[2] ?? '';
+    const id = /(?:^|\s)id="([^"]+)"/i.exec(attrs)?.[1];
+    const max = /(?:^|\s)maxlength="(\d+)"/i.exec(attrs)?.[1];
+    if (!id || !max) continue;
+    const limit = Number(max);
+    if (!Number.isFinite(limit)) continue;
+    limits.set(`#${id}`, limit);
+  }
+  return limits;
+}

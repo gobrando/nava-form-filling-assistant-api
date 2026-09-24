@@ -15,5 +15,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: '/work/repair',
+  matcher: ['/work/repair', '/work/repair/readback'],
 };

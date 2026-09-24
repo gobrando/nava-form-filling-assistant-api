@@ -33,6 +33,14 @@ export default async function RepairPage({
         <a href="/work">IHSS packet</a>
       </p>
 
+      <p>
+        A repaired map does not skip readback.{' '}
+        <a href={`/work/repair/readback${desk.form === 'ihss' ? '?form=ihss' : ''}`}>
+          Open the readback checklist
+        </a>
+        .
+      </p>
+
       {desk.statusNote ? (
         <p className={desk.notice === 'saved' ? 'saved' : 'notice'}>{desk.statusNote}</p>
       ) : null}
