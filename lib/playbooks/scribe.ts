@@ -16,6 +16,9 @@ import type { PlaybookRow } from './registry';
  * control.
  *
  * It does not see values. An observation is selectors, labels, and counts.
+ * The extension may also send `required` and `question` (a fieldset legend,
+ * only when it differs from the label). Those are metadata. They are not a
+ * value, and they are not used to move a protected field or to break a tie.
  * A protected field (SSN, income, the rest of DO_NOT_DERIVE) moves only on a
  * distinctive word such as "social" or "security", never because a nearby
  * "case number" was the only thing left. A tie is a refusal. Guessing a
@@ -23,7 +26,7 @@ import type { PlaybookRow } from './registry';
  * product exists to prevent.
  */
 
-export const observedControlSchema = z
+const observedControlFields = z
   .object({
     selector: z.string().min(1).max(500),
     label: z.string().max(240),
@@ -33,6 +36,27 @@ export const observedControlSchema = z
     count: z.number().int().min(0).max(50),
   })
   .strict();
+
+/** A `value` key at any depth. The typed text is never copied into an error. */
+function carriesValue(input: unknown): boolean {
+  if (!input || typeof input !== 'object') return false;
+  if (Array.isArray(input)) return input.some((item) => carriesValue(item));
+  for (const [key, nested] of Object.entries(input)) {
+    if (key === 'value' || carriesValue(nested)) return true;
+  }
+  return false;
+}
+
+export const observedControlSchema = z
+  .unknown()
+  .superRefine((input, ctx) => {
+    if (!carriesValue(input)) return;
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'An observation included a value.',
+    });
+  })
+  .pipe(observedControlFields);
 
 export type ObservedControl = z.infer<typeof observedControlSchema>;
 
@@ -137,7 +161,9 @@ function entryWords(purpose: string | null, fieldKey: string) {
 }
 
 function controlWords(control: ObservedControl) {
-  const all = tokenize(`${control.label} ${control.question ?? ''}`);
+  // Label only. `question` is the fieldset legend, not a second name for the
+  // control, so it cannot place a protected field or choose a side of a tie.
+  const all = tokenize(control.label);
   return {
     all,
     roles: new Set([...all].filter((word) => ROLES.has(word))),
@@ -164,7 +190,7 @@ function typesCompatible(playbookType: string, observedType: string): boolean {
 }
 
 function isSubmitLike(control: ObservedControl): boolean {
-  const text = `${control.selector} ${control.label} ${control.question ?? ''}`.toLowerCase();
+  const text = `${control.selector} ${control.label}`.toLowerCase();
   return /submit|captcha|sign-?in|log-?in|password/.test(text);
 }
 

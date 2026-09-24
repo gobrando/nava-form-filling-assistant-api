@@ -449,18 +449,10 @@ paths:
                   maxItems: 80
                   description: |
                     Controls on the page the caller already has open. Labels and
-                    counts only. Do not send values.
+                    counts, plus optional `required` and `question` metadata.
+                    Do not send values.
                   items:
-                    type: object
-                    required: [selector, label, type, count]
-                    additionalProperties: false
-                    properties:
-                      selector: { type: string }
-                      label: { type: string }
-                      question: { type: string }
-                      type: { type: string }
-                      required: { type: boolean }
-                      count: { type: integer, minimum: 0 }
+                    $ref: '#/components/schemas/ObservedControl'
                 repair:
                   type: boolean
                   description: |
@@ -1192,7 +1184,9 @@ paths:
       description: |
         The caller reports the controls on the page it already has open:
         selector, label, type, and how many elements the selector matched.
-        Values are not accepted.
+        `required` and `question` are optional metadata from the extension.
+        They are not used to move a protected field or to break a tie, and
+        `question` is not the field label. Values are not accepted.
 
         The scribe keeps a selector that still matches once, and moves a field
         only when one control's label uniquely names it. A protected field
@@ -1227,16 +1221,7 @@ paths:
                   type: array
                   maxItems: 80
                   items:
-                    type: object
-                    required: [selector, label, type, count]
-                    additionalProperties: false
-                    properties:
-                      selector: { type: string }
-                      label: { type: string }
-                      question: { type: string }
-                      type: { type: string }
-                      required: { type: boolean }
-                      count: { type: integer, minimum: 0 }
+                    $ref: '#/components/schemas/ObservedControl'
       responses:
         '200':
           description: |
@@ -1511,9 +1496,34 @@ components:
             reviewerPrincipal: { type: string, nullable: true }
             attestedAt: { type: string, format: date-time, nullable: true }
 
+    ObservedControl:
+      type: object
+      additionalProperties: false
+      description: |
+        One control from the page the caller already has open. `question` is
+        the fieldset legend when it differs from `label`. `required` is present
+        only when true. Neither places a field, and a `value` property is
+        rejected.
+      required: [selector, label, type, count]
+      properties:
+        selector: { type: string, minLength: 1, maxLength: 500 }
+        label: { type: string, maxLength: 240 }
+        question:
+          type: string
+          maxLength: 240
+          description: Fieldset legend. Not a value, and not the published field label.
+        type: { type: string, maxLength: 40 }
+        required:
+          type: boolean
+          description: True when the control is required. Omitted otherwise. Not used to place the field.
+        count: { type: integer, minimum: 0, maximum: 50 }
+
     RepairObservedControl:
       type: object
       additionalProperties: false
+      description: |
+        Selector, label, and count from a refused repair. Question text is not
+        copied here in place of the label, and a value is not included.
       required: [selector, label, count]
       properties:
         selector: { type: string }

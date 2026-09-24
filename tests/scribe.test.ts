@@ -39,15 +39,132 @@ function row(
 const wicSeed = wicSeedPlaybook();
 
 describe('an observation', () => {
-  it('rejects a value, because the scribe never sees what a person typed', () => {
-    const parsed = observedControlSchema.safeParse({
-      selector: '#applicant-name',
-      label: 'Name',
-      type: 'text',
+  const extensionObserved = [
+    { selector: '#applicant-name', label: 'Name', type: 'text', count: 1, required: true as const },
+    {
+      selector: '#contact-email',
+      label: 'Email',
+      type: 'radio',
       count: 1,
-      value: 'Jordan Sample',
+      question: 'Preferred contact method',
+    },
+  ];
+
+  it('accepts the extension shape and repairs as it would without that metadata', () => {
+    const parsed = observedControlSchema.array().safeParse(extensionObserved);
+    expect(parsed.success).toBe(true);
+    const previous = row({
+      probes: ['#old-name', '#old-email', '#old-contact'],
+      fieldMap: [
+        { fieldKey: '#old-name', purpose: 'fullName', inputType: 'text', required: true },
+        { fieldKey: '#old-email', purpose: 'email', inputType: 'text' },
+        { fieldKey: '#old-contact', purpose: 'preferredContact', inputType: 'select' },
+      ],
     });
-    expect(parsed.success).toBe(false);
+    const stripped = extensionObserved.map(({ selector, label, type, count }) => ({
+      selector,
+      label,
+      type,
+      count,
+    }));
+    expect(proposeRepair(previous, extensionObserved)).toEqual(proposeRepair(previous, stripped));
+  });
+
+  it('rejects a value anywhere in an observation and does not echo it', () => {
+    const secret = 'Jordan Sample';
+    const cases = [
+      {
+        selector: '#applicant-name',
+        label: 'Name',
+        type: 'text',
+        count: 1,
+        value: secret,
+      },
+      {
+        selector: '#contact-email',
+        label: 'Email',
+        type: 'radio',
+        count: 1,
+        question: 'Preferred contact method',
+        note: { value: secret },
+      },
+    ];
+    for (const input of cases) {
+      const parsed = observedControlSchema.safeParse(input);
+      expect(parsed.success).toBe(false);
+      if (parsed.success) continue;
+      const detail = parsed.error.issues
+        .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+        .join('; ');
+      expect(detail).not.toContain(secret);
+      expect(detail).not.toContain('Jordan');
+      expect(JSON.stringify(parsed.error.issues)).not.toContain(secret);
+    }
+  });
+
+  it('does not copy question text into a published field label', () => {
+    const question = 'Preferred contact method';
+    const proposal = proposeRepair(
+      row({
+        probes: ['#old-email'],
+        fieldMap: [{ fieldKey: '#old-email', purpose: 'email', inputType: 'text' }],
+      }),
+      [
+        {
+          selector: '#contact-email',
+          label: 'Email',
+          type: 'email',
+          count: 1,
+          question,
+          required: true,
+        },
+      ],
+    );
+    expect(proposal.publishable).toBe(true);
+    expect(proposal.moved[0]?.reason).toContain('Email');
+    expect(proposal.fieldMap).toEqual([
+      expect.objectContaining({ fieldKey: '#contact-email', purpose: 'email', inputType: 'text' }),
+    ]);
+    expect(JSON.stringify(proposal.fieldMap)).not.toContain(question);
+    expect(JSON.stringify(proposal)).not.toContain(question);
+  });
+
+  it('does not move a protected field or skip a tie because of question or required', () => {
+    const protectedField = proposeRepair(
+      row({
+        probes: ['#ssn'],
+        fieldMap: [{ fieldKey: '#ssn', purpose: 'ssn', inputType: 'text', method: 'keys' }],
+      }),
+      [
+        {
+          selector: '#case-number',
+          label: 'Case number',
+          type: 'text',
+          count: 1,
+          required: true,
+          question: 'Social Security Number',
+        },
+      ],
+    );
+    expect(protectedField.publishable).toBe(false);
+    expect(protectedField.moved).toHaveLength(0);
+    expect(protectedField.fieldMap).toHaveLength(0);
+
+    const tie = proposeRepair(
+      row({
+        probes: ['#full', '#first'],
+        fieldMap: [
+          { fieldKey: '#full', purpose: 'fullName', inputType: 'text', required: true },
+          { fieldKey: '#first', purpose: 'firstName', inputType: 'text' },
+        ],
+      }),
+      [
+        { selector: '#name-a', label: 'Name', type: 'text', count: 1, required: true },
+        { selector: '#name-b', label: 'Name', type: 'text', count: 1, question: 'Full legal name' },
+      ],
+    );
+    expect(tie.publishable).toBe(false);
+    expect(tie.moved).toHaveLength(0);
   });
 });
 

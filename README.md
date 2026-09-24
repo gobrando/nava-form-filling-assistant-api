@@ -329,7 +329,12 @@ a model key. Most changes are smaller than that. The questions are the same
 and the ids are not.
 
 `POST /v1/programs/{slug}/playbook/repair` takes the controls the caller
-already has on screen — selector, label, type, count. It does not take values.
+already has on screen — selector, label, type, count. The Chrome extension
+may also send `required` (only when true) and `question` (the fieldset legend,
+only when it differs from the label, at most 240 characters). Those are
+metadata. They do not move a protected field, they do not break a tie, and
+`question` is not stored as the field label. A `value` property anywhere in
+an observation is rejected, and the error does not repeat what was typed.
 Leave `publish` off for a dry run. The scribe keeps a selector that still
 matches one element, and moves a field only when a single label uniquely names
 it. Publishing writes a **new version on that tenant**. The shared playbook is
